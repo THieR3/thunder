@@ -12,7 +12,7 @@ load_dotenv()
 
 import pytesseract
 
-pytesseract.pytesseract.tesseract_cmd = r"D:\thunder\Tesseract-OCR\tesseract.exe"
+pytesseract.pytesseract.tesseract_cmd = r"Tesseract-OCR\tesseract.exe"
 app = Flask(__name__, static_folder='static')
 CORS(app)
 os.makedirs('static/uploads', exist_ok=True)
