@@ -11,8 +11,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import pytesseract
-
-pytesseract.pytesseract.tesseract_cmd = r"Tesseract-OCR\tesseract.exe"
+if os.name == 'nt':
+    # Configuration pour Windows (votre local)
+    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+else:
+    # Configuration pour Railway (Linux)
+    # Sous Linux, après installation, il est directement dans le PATH
+    pytesseract.pytesseract.tesseract_cmd = 'tesseract'
+#pytesseract.pytesseract.tesseract_cmd = r"Tesseract-OCR\tesseract.exe"
 app = Flask(__name__, static_folder='static')
 CORS(app)
 os.makedirs('static/uploads', exist_ok=True)
