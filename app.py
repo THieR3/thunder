@@ -11,6 +11,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import pytesseract
+
+if os.getenv('RAILWAY_ENVIRONMENT'):
+    # Sur Railway, après l'install via le .toml, tesseract est ici :
+    pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+    
+    
 if os.name == 'nt':
     # Configuration pour Windows (votre local)
     pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
