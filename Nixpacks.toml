@@ -1,2 +1,5 @@
 [phases.setup]
 nixPkgs = ["python", "tesseract-ocr"]
+
+[start]
+cmd = "python app.py"
