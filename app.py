@@ -17,13 +17,17 @@ if os.getenv('RAILWAY_ENVIRONMENT'):
     pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
     
     
-if os.name == 'nt':
-    # Configuration pour Windows (votre local)
-    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+if os.name != 'nt':
+    # Sur Railway/Linux
+    pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+    
+    # Debug : On vérifie si le fichier existe vraiment là où on l'attend
+    if not os.path.exists('/usr/bin/tesseract'):
+        print("ALERTE : Tesseract est introuvable dans /usr/bin/tesseract")
 else:
-    # Configuration pour Railway (Linux)
-    # Sous Linux, après installation, il est directement dans le PATH
-    pytesseract.pytesseract.tesseract_cmd = 'tesseract'
+    # Local Windows
+    pytesseract.pytesseract.tesseract_cmd = r"Tesseract-OCR\tesseract.exe"
+    
 #pytesseract.pytesseract.tesseract_cmd = r"Tesseract-OCR\tesseract.exe"
 app = Flask(__name__, static_folder='static')
 CORS(app)
