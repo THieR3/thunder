@@ -396,4 +396,5 @@ if __name__ == '__main__':
     print(f"  Mode IA  : {'✓ clé présente' if k else '✗ ANTHROPIC_API_KEY manquante'}")
     print(f"  Mode CV  : ✓ OpenCV {cv2.__version__} + Tesseract {pytesseract.get_tesseract_version()}")
     print('=' * 55)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
     app.run(debug=True, port=5000)
