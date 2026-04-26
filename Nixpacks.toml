@@ -1,0 +1,5 @@
+[phases.setup]
+nixPkgs = ["python311", "tesseract-ocr", "libtesseract-dev"]
+
+[phases.install]
+cmds = ["python -m venv /opt/venv && . /opt/venv/bin/activate && pip install -r requirements.txt"]
