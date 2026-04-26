@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>thunder — Dimensionnement électrique NFC 15-100</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#060810;--sur:#0f1220;--sur2:#161b2e;
+  --acc:#5b8af7;--acc2:#7c5cf6;--ok:#3ecf8e;--warn:#f5a524;
+  --txt:#e8eaf0;--txt2:#8890a8;--txt3:#404560;
+  --brd:rgba(255,255,255,0.07);
+}
+html,body{height:100%;overflow-x:hidden}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--txt);min-height:100vh}
+
+/* ── NOISE TEXTURE ── */
+body::before{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");opacity:.4;pointer-events:none;z-index:0}
+
+/* ── GRID BG ── */
+.grid-bg{position:fixed;inset:0;background-image:linear-gradient(rgba(91,138,247,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(91,138,247,.04) 1px,transparent 1px);background-size:48px 48px;pointer-events:none;z-index:0}
+
+/* ── GLOW ── */
+.glow{position:fixed;width:600px;height:600px;border-radius:50%;background:radial-gradient(circle,rgba(91,138,247,.12) 0%,transparent 70%);top:-200px;right:-100px;pointer-events:none;z-index:0}
+.glow2{position:fixed;width:400px;height:400px;border-radius:50%;background:radial-gradient(circle,rgba(124,92,246,.1) 0%,transparent 70%);bottom:-100px;left:-100px;pointer-events:none;z-index:0}
+
+/* ── NAV ── */
+nav{position:fixed;top:0;left:0;right:0;height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 40px;background:rgba(6,8,16,.8);backdrop-filter:blur(12px);border-bottom:1px solid var(--brd);z-index:100}
+.nav-logo{font-family:'Space Mono',monospace;font-size:16px;font-weight:700;color:var(--acc);display:flex;align-items:center;gap:8px}
+.logo-icon{width:28px;height:28px;background:linear-gradient(135deg,var(--acc),var(--acc2));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px}
+.nav-right{display:flex;align-items:center;gap:12px}
+.nav-badge{font-size:10px;padding:3px 10px;border-radius:20px;background:rgba(91,138,247,.1);border:1px solid rgba(91,138,247,.25);color:var(--acc);font-family:'Space Mono',monospace}
+
+/* ── SPLIT LAYOUT ── */
+.split{display:grid;grid-template-columns:1fr 1fr;min-height:100vh;position:relative;z-index:1}
+
+/* ── LEFT: HERO ── */
+.hero{padding:120px 60px 80px;display:flex;flex-direction:column;justify-content:center}
+.hero-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:5px 12px;background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.2);border-radius:20px;color:var(--ok);margin-bottom:24px;width:fit-content}
+.hero-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--ok);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+h1{font-size:clamp(32px,3.5vw,52px);font-weight:600;line-height:1.15;margin-bottom:20px;letter-spacing:-.02em}
+h1 span{background:linear-gradient(135deg,var(--acc),var(--acc2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero-sub{font-size:16px;color:var(--txt2);line-height:1.7;margin-bottom:36px;max-width:480px}
+.features{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:40px}
+.feat{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;background:var(--sur);border:1px solid var(--brd);border-radius:10px}
+.feat-icon{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.feat-icon.blue{background:rgba(91,138,247,.15)}
+.feat-icon.green{background:rgba(62,207,142,.12)}
+.feat-icon.amber{background:rgba(245,165,36,.12)}
+.feat-icon.purple{background:rgba(124,92,246,.12)}
+.feat-name{font-size:12px;font-weight:500;margin-bottom:2px}
+.feat-desc{font-size:10px;color:var(--txt3);line-height:1.4}
+.stats{display:flex;gap:28px}
+.stat-val{font-family:'Space Mono',monospace;font-size:22px;font-weight:700;color:var(--acc)}
+.stat-lbl{font-size:11px;color:var(--txt3);margin-top:2px}
+
+/* ── RIGHT: AUTH CARD ── */
+.auth-side{padding:120px 60px 80px;display:flex;align-items:center;justify-content:center}
+.auth-card{background:var(--sur);border:1px solid var(--brd);border-radius:20px;padding:36px;width:100%;max-width:400px;position:relative;overflow:hidden}
+.auth-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+.auth-title{font-size:20px;font-weight:600;margin-bottom:4px}
+.auth-sub{font-size:13px;color:var(--txt2);margin-bottom:28px}
+
+/* ── TABS ── */
+.auth-tabs{display:flex;gap:2px;background:var(--sur2);border-radius:10px;padding:3px;margin-bottom:24px}
+.auth-tab{flex:1;padding:8px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;text-align:center;transition:all .2s;color:var(--txt3);border:none;background:transparent;font-family:'DM Sans',sans-serif}
+.auth-tab.active{background:var(--bg);color:var(--txt);box-shadow:0 1px 4px rgba(0,0,0,.4)}
+
+/* ── FORM ── */
+.form-group{margin-bottom:16px}
+.form-label{font-size:11px;font-weight:500;color:var(--txt2);margin-bottom:6px;display:block;text-transform:uppercase;letter-spacing:.06em}
+.form-input{width:100%;padding:11px 14px;background:var(--sur2);border:1px solid var(--brd);border-radius:9px;color:var(--txt);font-size:14px;font-family:'DM Sans',sans-serif;transition:border-color .2s,box-shadow .2s;outline:none}
+.form-input:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(91,138,247,.12)}
+.form-input::placeholder{color:var(--txt3)}
+
+.btn-primary{width:100%;padding:12px;background:linear-gradient(135deg,var(--acc),var(--acc2));border:none;border-radius:9px;color:#fff;font-size:14px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:opacity .2s,transform .1s;margin-bottom:12px}
+.btn-primary:hover{opacity:.88}
+.btn-primary:active{transform:scale(.98)}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+
+.btn-google{width:100%;padding:11px;background:var(--sur2);border:1px solid var(--brd);border-radius:9px;color:var(--txt);font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;gap:10px;transition:all .2s;margin-bottom:16px}
+.btn-google:hover{border-color:var(--acc);background:rgba(91,138,247,.05)}
+.btn-google svg{width:18px;height:18px;flex-shrink:0}
+
+.divider{display:flex;align-items:center;gap:10px;margin-bottom:16px;color:var(--txt3);font-size:11px}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--brd)}
+
+.form-error{background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.2);border-radius:8px;padding:10px 12px;font-size:12px;color:#f87171;margin-bottom:14px;display:none}
+.form-error.show{display:block}
+.form-success{background:rgba(62,207,142,.08);border:1px solid rgba(62,207,142,.2);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--ok);margin-bottom:14px;display:none}
+.form-success.show{display:block}
+
+.forgot-link{font-size:12px;color:var(--acc);text-align:right;display:block;cursor:pointer;text-decoration:none;margin-top:-8px;margin-bottom:16px;background:none;border:none;font-family:'DM Sans',sans-serif}
+.forgot-link:hover{text-decoration:underline}
+
+.terms{font-size:10px;color:var(--txt3);text-align:center;margin-top:16px;line-height:1.5}
+.terms a{color:var(--acc);text-decoration:none}
+
+/* ── LOADING SPINNER ── */
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px;display:none}
+.btn-primary.loading .spinner{display:inline-block}
+.btn-primary.loading .btn-text{opacity:.7}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── RESPONSIVE ── */
+@media(max-width:900px){
+  .split{grid-template-columns:1fr}
+  .hero{padding:100px 28px 40px;text-align:center}
+  .features{grid-template-columns:1fr}
+  .stats{justify-content:center}
+  .hero-badge{margin:0 auto 24px}
+  .hero-sub{margin:0 auto 36px}
+  .auth-side{padding:20px 24px 60px}
+  nav{padding:0 20px}
+}
+
+/* ── FORGOT PASSWORD PANEL ── */
+#forgot-panel{display:none}
+#login-panel,#signup-panel{display:none}
+#login-panel.active,#signup-panel.active{display:block}
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div class="glow"></div>
+<div class="glow2"></div>
+
+<nav>
+  <div class="nav-logo">
+    <div class="logo-icon">⚡</div>
+    Thunder
+  </div>
+  <div class="nav-right">
+    <span class="nav-badge">NFC 15-100</span>
+  </div>
+</nav>
+
+<div class="split">
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-badge">Disponible maintenant · Bêta gratuite</div>
+    <h1>Dimensionnement électrique<br><span>assisté par IA</span></h1>
+    <p class="hero-sub">
+      Importez votre plan d'architecture, laissez l'IA détecter les pièces,
+      et obtenez une installation NFC 15-100 complète en quelques minutes.
+    </p>
+
+    <div class="features">
+      <div class="feat">
+        <div class="feat-icon blue">🤖</div>
+        <div><div class="feat-name">Analyse IA</div><div class="feat-desc">Détection automatique des pièces par vision IA ou OpenCV</div></div>
+      </div>
+      <div class="feat">
+        <div class="feat-icon green">📐</div>
+        <div><div class="feat-name">Plan interactif</div><div class="feat-desc">Zones redimensionnables, appareils déplaçables, câblage visuel</div></div>
+      </div>
+      <div class="feat">
+        <div class="feat-icon amber">⚡</div>
+        <div><div class="feat-name">Bilan de puissance</div><div class="feat-desc">Coefficients Ks·Ku·Ke NFC 15-100 calculés automatiquement</div></div>
+      </div>
+      <div class="feat">
+        <div class="feat-icon purple">🏢</div>
+        <div><div class="feat-name">Multi-appartements</div><div class="feat-desc">Gérez un immeuble entier avec bilan global</div></div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div><div class="stat-val">NFC</div><div class="stat-lbl">15-100 intégré</div></div>
+      <div><div class="stat-val">10+</div><div class="stat-lbl">Types de pièces</div></div>
+      <div><div class="stat-val">PDF</div><div class="stat-lbl">Export schéma</div></div>
+    </div>
+  </div>
+
+  <!-- AUTH CARD -->
+  <div class="auth-side">
+    <div class="auth-card">
+      <div class="auth-title">Accéder à Thunder⚡</div>
+      <div class="auth-sub">Connectez-vous pour sauvegarder vos projets</div>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tab-login" onclick="switchTab('login')">Connexion</button>
+        <button class="auth-tab" id="tab-signup" onclick="switchTab('signup')">Créer un compte</button>
+      </div>
+
+      <div id="error-box" class="form-error"></div>
+      <div id="success-box" class="form-success"></div>
+
+      <!-- Google -->
+      <button class="btn-google" onclick="signInGoogle()">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Continuer avec Google
+      </button>
+
+      <div class="divider">ou par email</div>
+
+      <!-- LOGIN PANEL -->
+      <div id="login-panel" class="active">
+        <div class="form-group">
+          <label class="form-label">Adresse email</label>
+          <input class="form-input" type="email" id="login-email" placeholder="vous@exemple.com" autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Mot de passe</label>
+          <input class="form-input" type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password">
+        </div>
+        <button class="forgot-link" onclick="showForgot()">Mot de passe oublié ?</button>
+        <button class="btn-primary" id="btn-login" onclick="signInEmail()">
+          <div class="spinner"></div>
+          <span class="btn-text">Se connecter</span>
+        </button>
+      </div>
+
+      <!-- SIGNUP PANEL -->
+      <div id="signup-panel">
+        <div class="form-group">
+          <label class="form-label">Nom complet</label>
+          <input class="form-input" type="text" id="signup-name" placeholder="Jean Dupont" autocomplete="name">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Adresse email</label>
+          <input class="form-input" type="email" id="signup-email" placeholder="vous@exemple.com" autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Mot de passe</label>
+          <input class="form-input" type="password" id="signup-pass" placeholder="Minimum 8 caractères" autocomplete="new-password">
+        </div>
+        <button class="btn-primary" id="btn-signup" onclick="signUpEmail()">
+          <div class="spinner"></div>
+          <span class="btn-text">Créer mon compte</span>
+        </button>
+        <p class="terms">En créant un compte, vous acceptez nos <a href="#">Conditions d'utilisation</a> et notre <a href="#">Politique de confidentialité</a></p>
+      </div>
+
+      <!-- FORGOT PANEL -->
+      <div id="forgot-panel">
+        <p style="font-size:13px;color:var(--txt2);margin-bottom:16px">Entrez votre email pour recevoir un lien de réinitialisation.</p>
+        <div class="form-group">
+          <label class="form-label">Adresse email</label>
+          <input class="form-input" type="email" id="forgot-email" placeholder="vous@exemple.com">
+        </div>
+        <button class="btn-primary" id="btn-forgot" onclick="sendReset()">
+          <div class="spinner"></div>
+          <span class="btn-text">Envoyer le lien</span>
+        </button>
+        <button class="forgot-link" onclick="showLogin()" style="text-align:left">← Retour à la connexion</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import {
+  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword,
+  sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup,
+  onAuthStateChanged, updateProfile
+} from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+import {
+  getFirestore, doc, setDoc, getDoc, serverTimestamp
+} from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+// ════════════════════════════════════════════════════════
+// 🔧 FIREBASE CONFIG — loaded from server
+// ════════════════════════════════════════════════════════
+let firebaseConfig = null;
+let fbApp, auth, db, googleProvider;
+
+// Initialize Firebase when config is loaded
+async function initializeFirebase() {
+  try {
+    const response = await fetch('/api/config');
+    const data = await response.json();
+    firebaseConfig = data.firebase;
+    
+    fbApp  = initializeApp(firebaseConfig);
+    auth   = getAuth(fbApp);
+    db     = getFirestore(fbApp);
+    googleProvider = new GoogleAuthProvider();
+
+    // Expose to window for onclick handlers
+    window._auth = auth;
+    window._db   = db;
+    window._googleProvider = googleProvider;
+    window._createUserWithEmailAndPassword = createUserWithEmailAndPassword;
+    window._signInWithEmailAndPassword     = signInWithEmailAndPassword;
+    window._sendPasswordResetEmail         = sendPasswordResetEmail;
+    window._signInWithPopup                = signInWithPopup;
+    window._updateProfile                  = updateProfile;
+    window._doc                            = doc;
+    window._setDoc                         = setDoc;
+    window._getDoc                         = getDoc;
+    window._serverTimestamp                = serverTimestamp;
+
+    // ── Auth state observer ────────────────────────────────
+    onAuthStateChanged(auth, async user => {
+      if(user){
+        try{
+          // User is signed in → ensure profile then redirect to app
+          await ensureUserProfile(user);
+          (function(){
+            const port = location.port || '';
+            // If served by simple http.server on port 8000, redirect to local index.html
+            if(port === '8000'){
+              window.location.href = './index.html';
+              return;
+            }
+            // Default: redirect to Flask route /app (when running python app.py)
+            window.location.href = '/app';
+          })();
+        }catch(e){
+          console.error('onAuthStateChanged -> ensureUserProfile failed:', e);
+          showError('Erreur lors de la mise à jour du profil: ' + (e.code||'') + ' ' + (e.message||e));
+          // Do not redirect so user can see the error
+        }
+      }
+    });
+  } catch(e) {
+    console.error('Failed to initialize Firebase:', e);
+    showError('Erreur d\'initialisation. Rechargez la page.');
+  }
+}
+
+// Initialize Firebase immediately
+initializeFirebase();
+
+async function ensureUserProfile(user){
+  try{
+    const ref = _doc(db, 'users', user.uid);
+    const snap = await _getDoc(ref);
+    if(!snap.exists()){
+      await _setDoc(ref, {
+        uid:         user.uid,
+        email:       user.email,
+        displayName: user.displayName || user.email.split('@')[0],
+        createdAt:   serverTimestamp(),
+        plan:        'free',
+        projects:    0,
+      });
+    }
+  }catch(e){
+    console.error('ensureUserProfile -> Firestore error:', e);
+    throw e;
+  }
+}
+
+window.ensureUserProfile = ensureUserProfile;
+</script>
+
+<script>
+/* ── Tab switching ── */
+function switchTab(tab){
+  document.getElementById('login-panel').classList.toggle('active', tab==='login');
+  document.getElementById('signup-panel').classList.toggle('active', tab==='signup');
+  document.getElementById('forgot-panel').style.display='none';
+  document.getElementById('tab-login').classList.toggle('active', tab==='login');
+  document.getElementById('tab-signup').classList.toggle('active', tab==='signup');
+  clearMessages();
+}
+function showForgot(){
+  document.getElementById('login-panel').classList.remove('active');
+  document.getElementById('forgot-panel').style.display='block';
+  clearMessages();
+}
+function showLogin(){
+  document.getElementById('forgot-panel').style.display='none';
+  document.getElementById('login-panel').classList.add('active');
+  clearMessages();
+}
+
+/* ── Error / success messages ── */
+function showError(msg){
+  const el=document.getElementById('error-box');
+  el.textContent=msg; el.classList.add('show');
+  document.getElementById('success-box').classList.remove('show');
+}
+function showSuccess(msg){
+  const el=document.getElementById('success-box');
+  el.textContent=msg; el.classList.add('show');
+  document.getElementById('error-box').classList.remove('show');
+}
+function clearMessages(){
+  document.getElementById('error-box').classList.remove('show');
+  document.getElementById('success-box').classList.remove('show');
+}
+
+function setLoading(btnId, loading){
+  const btn=document.getElementById(btnId);
+  btn.classList.toggle('loading', loading);
+  btn.disabled=loading;
+}
+
+/* ── Firebase error messages in French ── */
+function fbErr(code){
+  const map={
+    'auth/user-not-found':      'Aucun compte avec cet email.',
+    'auth/wrong-password':      'Mot de passe incorrect.',
+    'auth/email-already-in-use':'Cet email est déjà utilisé.',
+    'auth/weak-password':       'Le mot de passe doit contenir au moins 6 caractères.',
+    'auth/invalid-email':       'Adresse email invalide.',
+    'auth/too-many-requests':   'Trop de tentatives. Réessayez dans quelques minutes.',
+    'auth/popup-closed-by-user':'Connexion annulée.',
+    'auth/network-request-failed':'Erreur réseau. Vérifiez votre connexion.',
+    'auth/invalid-api-key':     'Configuration Firebase incorrecte. Vérifiez vos clés.',
+  };
+  return map[code]||'Une erreur est survenue. Réessayez.';
+}
+
+/* ── Sign In with Email ── */
+async function signInEmail(){
+  clearMessages();
+  const email=document.getElementById('login-email').value.trim();
+  const pass=document.getElementById('login-pass').value;
+  if(!email||!pass){ showError('Remplissez tous les champs.'); return; }
+  setLoading('btn-login',true);
+  try{
+    await window._signInWithEmailAndPassword(window._auth, email, pass);
+    // onAuthStateChanged will redirect
+  }catch(e){
+    console.error('signInEmail error:', e);
+    showError(fbErr(e.code) + (e.code?(' ('+e.code+')'):''));
+    setLoading('btn-login',false);
+  }
+}
+
+/* ── Sign Up with Email ── */
+async function signUpEmail(){
+  clearMessages();
+  const name=document.getElementById('signup-name').value.trim();
+  const email=document.getElementById('signup-email').value.trim();
+  const pass=document.getElementById('signup-pass').value;
+  if(!name||!email||!pass){ showError('Remplissez tous les champs.'); return; }
+  if(pass.length<8){ showError('Le mot de passe doit contenir au moins 8 caractères.'); return; }
+  setLoading('btn-signup',true);
+  try{
+    const cred=await window._createUserWithEmailAndPassword(window._auth, email, pass);
+    await window._updateProfile(cred.user,{displayName:name});
+    await window.ensureUserProfile({...cred.user, displayName:name});
+    // onAuthStateChanged will redirect
+  }catch(e){
+    console.error('signUpEmail error:', e);
+    showError(fbErr(e.code) + (e.code?(' ('+e.code+')'):''));
+    setLoading('btn-signup',false);
+  }
+}
+
+/* ── Google Sign In ── */
+async function signInGoogle(){
+  clearMessages();
+  try{
+    await window._signInWithPopup(window._auth, window._googleProvider);
+    // onAuthStateChanged will redirect
+  }catch(e){
+    console.error('signInGoogle error:', e);
+    if(e.code!=='auth/popup-closed-by-user') showError(fbErr(e.code) + (e.code?(' ('+e.code+')'):''));
+  }
+}
+
+/* ── Password Reset ── */
+async function sendReset(){
+  clearMessages();
+  const email=document.getElementById('forgot-email').value.trim();
+  if(!email){ showError('Entrez votre adresse email.'); return; }
+  setLoading('btn-forgot',true);
+  try{
+    await window._sendPasswordResetEmail(window._auth, email);
+    showSuccess('Email de réinitialisation envoyé ! Vérifiez votre boîte mail.');
+    setLoading('btn-forgot',false);
+  }catch(e){
+    showError(fbErr(e.code));
+    setLoading('btn-forgot',false);
+  }
+}
+
+/* ── Enter key support ── */
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Enter') return;
+  const lp=document.getElementById('login-panel');
+  const sp=document.getElementById('signup-panel');
+  const fp=document.getElementById('forgot-panel');
+  if(lp.classList.contains('active'))  signInEmail();
+  else if(sp.classList.contains('active')) signUpEmail();
+  else if(fp.style.display!=='none')   sendReset();
+});
+</script>
+</body>
+</html>

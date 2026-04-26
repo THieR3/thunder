@@ -1,0 +1,2924 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>thunder — NFC 15-100</title>
+<!-- Hide UI until auth confirmed to prevent unauthenticated flash -->
+<style>html{visibility:hidden}</style>
+
+  <!-- Firebase Auth Guard -->
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+    import { getAuth, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+    import { getFirestore, doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+    // ── Load Firebase config from server ──────────────────────────────
+    let firebaseConfig = null;
+    let fbApp, auth, db;
+    let authStateResolved = false;
+
+    async function initializeAuth() {
+      try {
+        const response = await fetch('/api/config');
+        const data = await response.json();
+        firebaseConfig = data.firebase;
+
+        fbApp = initializeApp(firebaseConfig);
+        auth  = getAuth(fbApp);
+        db    = getFirestore(fbApp);
+
+        // Expose for use in main JS
+        window._auth   = auth;
+        window._db     = db;
+        window._signOut = signOut;
+        window._doc    = doc;
+        window._getDoc = getDoc;
+
+        onAuthStateChanged(auth, user => {
+          authStateResolved = true;
+          if(!user){
+            // Not logged in → redirect to landing (must be authenticated to view this page)
+            console.log('[Auth Guard] No user detected. Redirecting to login...');
+            window.location.href = '/';
+            return;
+          }
+          // User IS authenticated
+          console.log('[Auth Guard] User authenticated:', user.email);
+      // Store user info globally
+      window.currentUser = {
+        uid:         user.uid,
+        email:       user.email,
+        displayName: user.displayName || user.email.split('@')[0],
+        photoURL:    user.photoURL,
+      };
+      // Reveal the UI now that auth is confirmed
+      console.log('[Auth Guard] Making page visible...');
+      try{ document.documentElement.style.visibility = 'visible'; }catch(e){}
+      // Show user info in topbar
+      const uel = document.getElementById('user-info');
+      if(uel){
+        const nameSpan = document.createElement('span');
+        nameSpan.style.cssText = 'font-size:11px;color:var(--txt2)';
+        nameSpan.textContent = window.currentUser.displayName;
+        const outBtn = document.createElement('button');
+        outBtn.className = 'tbtn';
+        outBtn.style.cssText = 'height:26px;font-size:10px;color:var(--err)';
+        outBtn.textContent = '⎋ Déco';
+        outBtn.onclick = () => window.doSignOut();
+        uel.appendChild(nameSpan);
+        uel.appendChild(outBtn);
+      }
+        });
+
+        // Fallback: if auth check hasn't responded within 2s, redirect to login
+        setTimeout(() => {
+          if(!authStateResolved || !window.currentUser){
+            console.warn('[Auth Guard] Auth check timeout — user not authenticated. Redirecting to login...');
+            window.location.href = '/';
+          }
+        }, 2000);
+
+        window.doSignOut = async function(){
+          await signOut(auth);
+          window.location.href = '/';
+        };
+      } catch(e) {
+        console.error('[Auth Guard] Initialization error:', e);
+      }
+    }
+
+    // Initialize auth immediately
+    initializeAuth();
+  </script>
+
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0f1117;--sur:#1a1d27;--sur2:#22263a;--brd:rgba(255,255,255,0.07);--acc:#5b8af7;--acc2:#7c5cf6;--txt:#e8eaf0;--txt2:#8890a8;--txt3:#555d75;--ok:#3ecf8e;--warn:#f5a524;--err:#f87171;--rad:12px;--rsm:7px}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--txt);display:flex;flex-direction:column}
+
+/* ── topbar ── */
+.topbar{height:50px;background:var(--sur);border-bottom:1px solid var(--brd);display:flex;align-items:center;padding:0 12px;gap:7px;flex-shrink:0;z-index:100;overflow-x:auto}
+.topbar::-webkit-scrollbar{display:none}
+.logo{font-family:'Space Mono',monospace;font-size:13px;font-weight:700;color:var(--acc);display:flex;align-items:center;gap:5px;flex-shrink:0}
+.logo-dot{width:7px;height:7px;border-radius:50%;background:var(--acc2)}
+.sep{flex:1;min-width:4px}
+.nbadge{font-family:'Space Mono',monospace;font-size:9px;padding:3px 8px;background:rgba(91,138,247,.1);border:1px solid rgba(91,138,247,.25);border-radius:20px;color:var(--acc);flex-shrink:0}
+.tbtn{display:flex;align-items:center;gap:4px;padding:4px 9px;border-radius:var(--rsm);border:1px solid var(--brd);background:transparent;color:var(--txt2);font-family:'DM Sans',sans-serif;font-size:11px;cursor:pointer;transition:all .15s;white-space:nowrap;height:28px;flex-shrink:0}
+.tbtn:hover,.tbtn.on{border-color:var(--acc);color:var(--acc);background:rgba(91,138,247,.08)}
+.tbtn.danger.on{border-color:var(--err);color:var(--err);background:rgba(248,113,113,.08)}
+.tbtn.accent{background:linear-gradient(135deg,var(--acc),var(--acc2));border:none;color:#fff;font-weight:500}
+.tbtn.accent:hover{opacity:.85}.tbtn.accent.loading{opacity:.6;pointer-events:none}
+.spin{display:none;width:11px;height:11px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+.tbtn.loading .spin{display:block}.tbtn.loading .btxt{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.vtabs{display:flex;gap:2px;background:var(--sur2);border-radius:var(--rsm);padding:2px;flex-shrink:0}
+.vtab{padding:3px 9px;border-radius:5px;font-size:11px;cursor:pointer;color:var(--txt3);transition:all .14s;user-select:none}
+.vtab.on{background:var(--sur);color:var(--txt);box-shadow:0 1px 3px rgba(0,0,0,.35)}
+.mode-sel{display:flex;gap:2px;background:var(--sur2);border-radius:var(--rsm);padding:2px;flex-shrink:0}
+.mbtn{padding:3px 9px;border-radius:5px;font-size:11px;cursor:pointer;color:var(--txt3);transition:all .14s;user-select:none;border:none;background:transparent;font-family:'DM Sans',sans-serif}
+.mbtn.on.cv-mode{background:var(--sur);color:var(--ok)}
+.mbtn.on.ai-mode{background:var(--sur);color:var(--acc)}
+.tsep{width:1px;height:18px;background:var(--brd);margin:0 1px;flex-shrink:0}
+#file-input{display:none}
+
+/* ── layout ── */
+.main{display:flex;flex:1;overflow:hidden}
+
+/* ── sidebar ── */
+.sidebar{width:270px;background:var(--sur);border-right:1px solid var(--brd);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+.sb-head{padding:9px 12px 7px;border-bottom:1px solid var(--brd);display:flex;align-items:center;justify-content:space-between;gap:6px}
+.sb-title{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--txt3)}
+.sb-add{padding:3px 8px;border-radius:var(--rsm);border:1px solid var(--brd);background:transparent;color:var(--ok);font-size:10px;cursor:pointer;transition:all .14s;font-family:'DM Sans',sans-serif}
+.sb-add:hover{border-color:var(--ok);background:rgba(62,207,142,.08)}
+.rscroll{flex:1;overflow-y:auto;padding:6px}
+.rscroll::-webkit-scrollbar{width:3px}
+.rscroll::-webkit-scrollbar-thumb{background:var(--sur2);border-radius:2px}
+.rcard{background:var(--sur2);border:1px solid var(--brd);border-radius:var(--rad);margin-bottom:5px;overflow:hidden;transition:border-color .15s}
+.rcard.active{border-color:var(--acc)}
+.rhead{padding:7px 10px;display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none}
+.rdot{width:9px;height:9px;border-radius:3px;flex-shrink:0}
+.rname{font-size:12px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ractions{display:flex;gap:3px;flex-shrink:0}
+.raction{background:none;border:none;cursor:pointer;font-size:11px;color:var(--txt3);padding:1px 3px;border-radius:3px;transition:color .13s}
+.raction:hover{color:var(--acc)}
+.raction.del:hover{color:var(--err)}
+.chev{font-size:10px;color:var(--txt3);transition:transform .15s;flex-shrink:0}
+.rcard.open .chev{transform:rotate(90deg)}
+.rdevices{display:none;padding:0 7px 7px}
+.rcard.open .rdevices{display:block}
+.drow{display:flex;align-items:center;gap:5px;padding:4px 6px;border-radius:var(--rsm);background:rgba(255,255,255,.03);margin-bottom:2px;border:1px solid transparent}
+.drow:hover{border-color:var(--brd)}
+.dem{font-size:13px;flex-shrink:0}
+.dinf{flex:1;min-width:0}
+.dlbl{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dmet{font-size:9px;color:var(--txt3);margin-top:1px}
+.qctrl{display:flex;align-items:center;gap:2px;flex-shrink:0}
+.qbtn{width:17px;height:17px;border-radius:3px;border:1px solid var(--brd);background:var(--sur);color:var(--txt2);cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;transition:all .12s}
+.qbtn:hover{border-color:var(--acc);color:var(--acc)}
+.qval{font-family:'Space Mono',monospace;font-size:10px;min-width:13px;text-align:center}
+.addbtn{width:100%;padding:4px;background:transparent;border:1px dashed var(--brd);border-radius:var(--rsm);color:var(--txt3);font-size:10px;font-family:'DM Sans',sans-serif;cursor:pointer;margin-top:2px;transition:all .12s}
+.addbtn:hover{border-color:var(--acc);color:var(--acc)}
+.psec{padding:5px 7px 7px;border-top:1px solid var(--brd);margin-top:3px}
+.ptitle{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--txt3);margin-bottom:4px}
+.prow{display:flex;align-items:center;gap:5px;padding:3px 5px;border-radius:var(--rsm);background:rgba(248,113,113,.05);border:1px solid rgba(248,113,113,.12);margin-bottom:2px}
+.pio{font-size:12px;flex-shrink:0}.pinf{flex:1;min-width:0}
+.pnm{font-size:10px}.psp{font-size:8px;color:var(--txt3)}
+.addpbtn{width:100%;padding:3px;background:transparent;border:1px dashed rgba(248,113,113,.3);border-radius:var(--rsm);color:rgba(248,113,113,.6);font-size:9px;font-family:'DM Sans',sans-serif;cursor:pointer;transition:all .12s}
+.addpbtn:hover{border-color:var(--err);color:var(--err)}
+
+/* ── bilan ── */
+.bilan{border-top:1px solid var(--brd);padding:9px 12px;background:rgba(0,0,0,.2)}
+.bil-title{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--txt3);margin-bottom:6px}
+.bil-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.bil-stat{background:var(--sur2);border-radius:var(--rsm);padding:6px 8px;border:1px solid var(--brd)}
+.bsv{font-family:'Space Mono',monospace;font-size:13px;font-weight:700}
+.bsl{font-size:9px;color:var(--txt3);margin-top:1px}
+.bil-stat.good .bsv{color:var(--ok)}
+
+/* ── canvas area ── */
+.cwrap{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.ctoolbar{height:38px;background:var(--sur);border-bottom:1px solid var(--brd);display:flex;align-items:center;gap:6px;padding:0 10px;flex-shrink:0;overflow-x:auto}
+.ctoolbar::-webkit-scrollbar{display:none}
+.planc{flex:1;position:relative;overflow:hidden;background:#080b12;cursor:default}
+/* background image */
+#plan-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:.35;pointer-events:none;z-index:0;display:none}
+/* grid overlay */
+#plan-bg.show + #grid-overlay, .planc:not(:has(#plan-bg.show)) #grid-overlay{display:block}
+#grid-overlay{position:absolute;inset:0;pointer-events:none;z-index:1;
+  background-image:linear-gradient(rgba(255,255,255,.015) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.015) 1px,transparent 1px);
+  background-size:40px 40px}
+/* layers */
+#wire-svg{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:30}
+#room-layer{position:absolute;top:0;left:0;width:100%;height:100%;z-index:10}
+#dev-layer{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:20}
+/* overlays */
+.voverlay{position:absolute;inset:0;background:#080b12;overflow:auto;display:none;z-index:50;padding:14px}
+.voverlay.show{display:block}
+
+/* ── polygon room SVG ── */
+.room-poly{stroke-width:1.5;fill-opacity:.13;cursor:pointer;transition:fill-opacity .15s}
+.room-poly:hover{fill-opacity:.22}
+.room-poly.selected{fill-opacity:.26;stroke-dasharray:none}
+.room-vertex{cursor:move;fill-opacity:.85;stroke:#fff;stroke-width:1;transition:r .13s}
+.room-vertex:hover{r:7}
+.room-label{pointer-events:none;font-family:'DM Sans',sans-serif;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+
+/* ── device icons ── */
+.dico{position:absolute;width:32px;height:32px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:16px;cursor:grab;user-select:none;border:1.5px solid rgba(255,255,255,.12);background:rgba(15,17,23,.85);backdrop-filter:blur(4px);box-shadow:0 2px 9px rgba(0,0,0,.4);transition:box-shadow .12s,transform .1s;z-index:20;pointer-events:all}
+.dico:hover{box-shadow:0 4px 16px rgba(0,0,0,.6);transform:scale(1.09)}
+.dico:active{cursor:grabbing;transform:scale(1.12)}
+.dico.dragging{z-index:999;box-shadow:0 8px 26px rgba(0,0,0,.7)}
+.cpt{position:absolute;width:10px;height:10px;border-radius:50%;border:2px solid;cursor:crosshair;z-index:25;transition:transform .14s,background .14s;pointer-events:all}
+.cpt:hover{transform:scale(1.6)}
+.cpt.active-start{transform:scale(1.8);animation:pulse .6s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 currentColor}50%{box-shadow:0 0 0 5px transparent}}
+.pbadge{position:absolute;width:26px;height:26px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px;border:1.5px solid;background:rgba(15,17,23,.9);z-index:22;box-shadow:0 2px 7px rgba(0,0,0,.4);cursor:default;pointer-events:all}
+
+/* ── modals ── */
+.modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:2000;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+.modal-ov.open{display:flex}
+.modal{background:var(--sur);border:1px solid var(--brd);border-radius:var(--rad);padding:16px;width:310px;max-height:72vh;overflow-y:auto}
+.modal-title{font-size:12px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+.mclose{background:none;border:none;color:var(--txt2);font-size:16px;cursor:pointer;padding:0}
+.mopt{display:flex;align-items:center;gap:7px;padding:6px 8px;border-radius:var(--rsm);cursor:pointer;border:1px solid transparent;transition:all .12s}
+.mopt:hover{background:var(--sur2);border-color:var(--brd)}
+.mopt .em{font-size:16px}.mopt .mn{font-size:12px}.mopt .md{font-size:10px;color:var(--txt3)}
+.mopt.current{border-color:var(--acc);background:rgba(91,138,247,.08)}
+
+/* ── context menu ── */
+.ctx-menu{position:fixed;background:var(--sur);border:1px solid var(--brd);border-radius:var(--rsm);padding:4px;z-index:3000;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,.5);display:none}
+.ctx-menu.show{display:block}
+.ctx-item{padding:6px 10px;border-radius:4px;font-size:12px;cursor:pointer;color:var(--txt2);transition:all .12s;display:flex;align-items:center;gap:6px}
+.ctx-item:hover{background:var(--sur2);color:var(--txt)}
+.ctx-item.danger:hover{color:var(--err)}
+.ctx-sep{height:1px;background:var(--brd);margin:3px 0}
+
+/* ── toast + status ── */
+.toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:var(--sur2);border:1px solid var(--brd);padding:6px 14px;border-radius:14px;font-size:11px;color:var(--txt2);opacity:0;transition:opacity .22s;pointer-events:none;z-index:9999;white-space:nowrap}
+.toast.show{opacity:1}
+/* ── apartment tabs bar ── */
+.apt-bar{height:38px;background:#0a0d15;border-bottom:1px solid var(--brd);display:flex;align-items:center;gap:0;overflow-x:auto;flex-shrink:0;position:relative;z-index:90}
+.apt-bar::-webkit-scrollbar{height:3px}
+.apt-bar::-webkit-scrollbar-thumb{background:var(--sur2);border-radius:2px}
+.apt-tab{display:flex;align-items:center;gap:5px;padding:0 12px;height:100%;font-size:11px;cursor:pointer;color:var(--txt3);border-right:1px solid var(--brd);white-space:nowrap;flex-shrink:0;transition:all .14s;user-select:none;border-bottom:2px solid transparent}
+.apt-tab:hover{color:var(--txt);background:rgba(255,255,255,.03)}
+.apt-tab.active{color:var(--acc);border-bottom-color:var(--acc);background:rgba(91,138,247,.05)}
+.apt-tab .apt-dot{width:7px;height:7px;border-radius:50%;background:var(--acc2);flex-shrink:0}
+.apt-tab .apt-close{margin-left:2px;opacity:.4;font-size:13px;transition:opacity .12s;line-height:1}
+.apt-tab .apt-close:hover{opacity:1;color:var(--err)}
+.apt-add{padding:0 14px;height:100%;display:flex;align-items:center;font-size:18px;cursor:pointer;color:var(--txt3);border-right:1px solid var(--brd);transition:color .14s;flex-shrink:0}
+.apt-add:hover{color:var(--ok)}
+.apt-bar-label{padding:0 10px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--txt3);border-right:1px solid var(--brd);height:100%;display:flex;align-items:center;white-space:nowrap}
+/* building overview tab */
+.bld-tab{padding:0 14px;height:100%;display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;color:var(--txt3);border-right:1px solid var(--brd);white-space:nowrap;flex-shrink:0;transition:all .14s;border-bottom:2px solid transparent}
+.bld-tab:hover{color:var(--warn)}
+.bld-tab.active{color:var(--warn);border-bottom-color:var(--warn);background:rgba(245,165,36,.05)}
+/* apt name inline edit */
+.apt-name-input{background:transparent;border:none;border-bottom:1px solid var(--acc);color:var(--txt);font-size:11px;font-family:'DM Sans',sans-serif;outline:none;width:80px}
+/* building overview */
+.bld-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:16px}
+.apt-card{background:var(--sur2);border:1px solid var(--brd);border-radius:var(--rad);padding:12px 14px;cursor:pointer;transition:all .15s}
+.apt-card:hover{border-color:var(--acc);background:rgba(91,138,247,.05)}
+.apt-card-name{font-size:13px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.apt-card-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px}
+.apt-stat{background:var(--sur);border-radius:5px;padding:5px 7px;text-align:center}
+.apt-stat-val{font-family:'Space Mono',monospace;font-size:12px;font-weight:700}
+.apt-stat-lbl{font-size:9px;color:var(--txt3);margin-top:1px}
+
+/* ── data tables ── */
+.data-table{width:100%;border-collapse:collapse;font-size:12px}
+.data-table th{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--txt3);padding:6px 10px;border-bottom:1px solid var(--brd);text-align:left;white-space:nowrap;position:sticky;top:0;background:#080b12}
+.data-table td{padding:6px 10px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle}
+.data-table tr:hover td{background:rgba(255,255,255,.02)}
+.data-table td.num{font-family:'Space Mono',monospace;font-size:11px;text-align:right}
+.data-table td.hi{color:var(--warn);font-family:'Space Mono',monospace;font-size:11px;text-align:right;font-weight:600}
+.coef-input{width:50px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;color:var(--txt);font-family:'Space Mono',monospace;font-size:11px;padding:2px 4px;text-align:right}
+.coef-input:focus{outline:none;border-color:var(--acc)}
+.view-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px}
+.view-title{font-family:'Space Mono',monospace;font-size:13px;font-weight:700;color:var(--acc)}
+.export-btns{display:flex;gap:6px;flex-wrap:wrap}
+.exp-btn{padding:5px 12px;border-radius:var(--rsm);border:1px solid var(--brd);background:transparent;color:var(--txt2);font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;transition:all .14s;display:flex;align-items:center;gap:5px}
+.exp-btn:hover{border-color:var(--ok);color:var(--ok);background:rgba(62,207,142,.07)}
+.exp-btn.pdf:hover{border-color:var(--err);color:var(--err);background:rgba(248,113,113,.07)}
+.summary-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px}
+.sum-card{background:var(--sur2);border:1px solid var(--brd);border-radius:var(--rad);padding:10px 12px}
+.sum-val{font-family:'Space Mono',monospace;font-size:20px;font-weight:700;color:var(--warn)}
+.sum-label{font-size:10px;color:var(--txt3);margin-top:3px}
+.sum-card.accent{border-color:var(--acc)}.sum-card.accent .sum-val{color:var(--acc)}
+.sum-card.ok{border-color:var(--ok)}.sum-card.ok .sum-val{color:var(--ok)}
+
+/* rename inline */
+.rname-input{font-size:12px;font-weight:500;flex:1;min-width:0;background:transparent;border:none;border-bottom:1px solid var(--acc);color:var(--txt);outline:none;padding:0;font-family:'DM Sans',sans-serif}
+.dlbl-input{font-size:11px;background:transparent;border:none;border-bottom:1px solid var(--acc);color:var(--txt);outline:none;padding:0;font-family:'DM Sans',sans-serif;width:100%}
+/* TGBT box on plan */
+.tgbt-box{position:absolute;border-radius:8px;background:rgba(15,17,23,.92);border:2px solid #f5a524;cursor:move;user-select:none;z-index:22;pointer-events:all;padding:6px 8px;min-width:64px;text-align:center}
+.tgbt-title{font-family:'Space Mono',monospace;font-size:9px;color:#f5a524;font-weight:700;letter-spacing:.06em}
+.tgbt-sub{font-size:8px;color:#8890a8;margin-top:1px}
+.tgbt-cp{width:10px;height:10px;border-radius:50%;border:2px solid #f5a524;background:#f5a52433;position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);cursor:crosshair;pointer-events:all}
+/* wire control points */
+.wire-cp{cursor:move;fill:rgba(15,17,23,.9);transition:r .12s}
+.wire-cp:hover{r:7!important}
+/* length panel */
+.len-panel{border-top:1px solid var(--brd);padding:8px 12px;background:rgba(0,0,0,.15);max-height:200px;overflow-y:auto}
+.len-title{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--txt3);margin-bottom:6px}
+.len-row{display:flex;align-items:center;gap:6px;margin-bottom:4px;padding:4px 6px;border-radius:var(--rsm);background:var(--sur2);border:1px solid var(--brd)}
+.len-color{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.len-label{font-size:10px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.len-val{font-family:'Space Mono',monospace;font-size:10px;color:var(--warn);flex-shrink:0}
+
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════ TOPBAR ════════════════════════ -->
+<div class="topbar">
+  <div class="logo"><div class="logo-dot"></div>thunder</div>
+  <span class="nbadge">NFC 15-100</span>
+
+  <div class="vtabs">
+    <div class="vtab on" id="vtab-plan"   onclick="setView('plan',this)">📐 Plan</div>
+    <div class="vtab"    id="vtab-wiring" onclick="setView('wiring',this)">🔌 Câblage</div>
+    <div class="vtab"    id="vtab-schema" onclick="setView('schema',this)">📊 Schéma</div>
+    <div class="vtab" id="vtab-lengths"    onclick="setView('lengths',this)">📏 Longueurs</div>
+    <div class="vtab" id="vtab-powers"     onclick="setView('powers',this)">⚡ Puissances</div>
+    <div class="vtab" id="vtab-devices"    onclick="setView('devices',this)">🔌 Appareils</div>
+  </div>
+
+  <div class="tsep"></div>
+
+  <!-- wiring controls (plan only) -->
+  <button class="tbtn" id="wbtn" onclick="toggleWiringMode()">
+    <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 9Q3 3 6 6Q9 9 11 3" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 1.5" fill="none" stroke-linecap="round"/></svg>
+    Câblage
+  </button>
+  <button class="tbtn" onclick="deleteLastWire()" title="Effacer le dernier fil">↩ Fil</button>
+  <button class="tbtn" onclick="clearWires()" title="Effacer tous les fils">✕ Fils</button>
+
+  <div class="tsep"></div>
+
+  <!-- layer toggles -->
+  <button class="tbtn on" id="zbtn" onclick="toggleLayer('zones',this)">Zones</button>
+  <button class="tbtn on" id="dbtn" onclick="toggleLayer('devices',this)">Appareils</button>
+  <button class="tbtn on" id="wlbtn" onclick="toggleLayer('wires',this)">Fils</button>
+  <input type="range" id="opsl" min="5" max="45" value="15" oninput="setOp(this.value)" style="width:58px;accent-color:var(--acc)">
+
+  <div class="sep"></div>
+
+  <button class="tbtn" onclick="exportCSV()" title="Exporter appareils en CSV/Excel">⬇ CSV</button>
+  <button class="tbtn" onclick="exportPDF()" title="Exporter plan / schéma en PDF">⬇ PDF</button>
+  <div id="user-info" style="display:flex;align-items:center;gap:8px;flex-shrink:0"></div>
+  <span id="astatus" style="font-size:10px;display:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+  <span id="api-badge" style="font-family:'Space Mono',monospace;font-size:9px;padding:2px 8px;border-radius:14px;border:1px solid var(--brd);color:var(--txt3);white-space:nowrap;flex-shrink:0">… API</span>
+
+  <!-- mode selector -->
+  <div class="mode-sel">
+    <button class="mbtn ai-mode" id="mbtn-ai" onclick="setMode('ai')">✦ IA</button>
+    <button class="mbtn cv-mode on" id="mbtn-cv" onclick="setMode('cv')">🔍 CV</button>
+  </div>
+
+  <label class="tbtn" for="file-input">⬆ Plan</label>
+  <input type="file" id="file-input" accept="image/*">
+  <span id="fname" style="font-size:10px;color:var(--ok);display:none;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0"></span>
+  <button class="tbtn accent" id="abtn" onclick="analyzePlan()">
+    <span class="btxt" id="abtn-txt">🔍 Analyser</span><div class="spin"></div>
+  </button>
+</div>
+
+<!-- ════════════════ APARTMENT TAB BAR ════════════════ -->
+<div class="apt-bar" id="apt-bar">
+  <div class="apt-bar-label">🏢 Immeuble</div>
+  <div class="bld-tab active" id="bld-overview-tab" onclick="showBuildingOverview()" title="Vue d'ensemble de l'immeuble">🏢 Bilan immeuble</div>
+  <!-- apartment tabs injected by JS -->
+  <div class="apt-add" onclick="addApartment()" title="Ajouter un appartement">＋</div>
+</div>
+
+<!-- ════════════════════════ MAIN ════════════════════════ -->
+<div class="main">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sb-head">
+      <span class="sb-title">Pièces</span>
+      <span id="rcntbadge" style="font-family:'Space Mono',monospace;font-size:10px;color:var(--acc)">0 pièces</span>
+      <button class="sb-add" onclick="openAddRoomModal()">+ Ajouter</button>
+    </div>
+    <div class="rscroll" id="rlist"></div>
+    <div class="bilan">
+      <div class="bil-title">Bilan</div>
+      <div class="bil-grid">
+        <div class="bil-stat good"><div class="bsv" id="bpow">—</div><div class="bsl">kW total</div></div>
+        <div class="bil-stat"><div class="bsv" id="bdev">—</div><div class="bsl">Composants</div></div>
+        <div class="bil-stat"><div class="bsv" id="bcir">—</div><div class="bsl">Circuits</div></div>
+        <div class="bil-stat good"><div class="bsv" id="bcon">—</div><div class="bsl">Conformité</div></div>
+      </div>
+    </div>
+    <div class="len-panel" id="len-panel">
+      <div class="len-title">📏 Longueur des fils</div>
+      <div id="len-rows"><p style="font-size:10px;color:var(--txt3)">Tracez des fils pour voir les longueurs</p></div>
+    </div>
+  </div>
+
+  <!-- CANVAS -->
+  <div class="cwrap">
+    <div class="ctoolbar" id="ctoolbar">
+      <span style="font-size:9px;color:var(--txt3)">Opacité bg</span>
+      <input type="range" id="bg-op" min="0" max="80" value="35" oninput="setBgOp(this.value)" style="width:60px;accent-color:var(--acc)">
+      <div class="tsep"></div>
+      <button class="tbtn" id="tgbt-btn" onclick="toggleTGBT()" title="Afficher/cacher le tableau électrique">⚡ TGBT</button>
+      <button class="tbtn" onclick="autoWireToTGBT()" title="Tracer automatiquement les liaisons TGBT">🔗 Liaisons TGBT</button>
+      <button class="tbtn" id="poly-btn" onclick="toggleAddVertex()" title="Ajouter un sommet à la pièce sélectionnée">✦ Sommet</button>
+      <button class="tbtn" onclick="simplifySelected()" title="Simplifier en rectangle">⬜ Simplifier</button>
+      <label style="font-size:9px;color:var(--txt3);white-space:nowrap">H plafond</label>
+      <input type="number" id="ceiling-h" value="2.5" min="1" max="6" step="0.1"
+        style="width:44px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;color:var(--txt);font-size:10px;padding:2px 4px;font-family:'Space Mono',monospace"
+        oninput="if(curApt())curApt().ceilH=parseFloat(this.value)||2.5;updateLengths()" title="Hauteur sous plafond en mètres">
+      <span style="font-size:9px;color:var(--txt3)">m</span>
+      <div class="tsep"></div>
+      <label style="font-size:9px;color:var(--txt3);white-space:nowrap">Plan réel</label>
+      <input type="number" id="plan-width-m" value="12" min="1" max="200" step="0.5"
+        style="width:44px;background:var(--sur2);border:1px solid var(--brd);border-radius:4px;color:var(--txt);font-size:10px;padding:2px 4px;font-family:'Space Mono',monospace"
+        oninput="if(curApt())curApt().planWidthM=parseFloat(this.value)||12;updateLengths()" title="Largeur réelle du plan en mètres">
+      <span style="font-size:9px;color:var(--txt3)">m</span>
+      <button class="tbtn" id="calib-btn" onclick="toggleCalibMode()" title="Calibration : cliquez 2 points puis entrez la distance réelle">📐</button>
+      <div class="sep"></div>
+      <span id="wire-hint" style="font-size:10px;color:var(--warn);display:none">⚡ Câblage actif — cliquez 2 contacts</span>
+      <span id="calib-hint" style="font-size:10px;color:#9B59B6;display:none">📐 Cliquez 2 points de référence</span>
+      <div class="sep"></div>
+      <button class="tbtn" onclick="UI.zoomLevel=Math.min(5,UI.zoomLevel*1.2);applyZoomTransform();showZoomLevel()" title="Zoom avant (Ctrl++)">🔍+</button>
+      <button class="tbtn" onclick="UI.zoomLevel=Math.max(0.2,UI.zoomLevel/1.2);applyZoomTransform();showZoomLevel()" title="Zoom arrière (Ctrl+-)">🔍-</button>
+      <button class="tbtn" onclick="resetZoom()" title="Réinitialiser le zoom (Ctrl+0)">↺ 100%</button>
+    </div>
+
+    <div class="planc" id="planc">
+      <img id="plan-bg" alt="plan">
+      <div id="grid-overlay"></div>
+      <!-- SVG layer: rooms (polygons) + wires -->
+      <svg id="room-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:10;overflow:visible"></svg>
+      <!-- SVG layer: wires only -->
+      <svg id="wire-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:30;overflow:visible"></svg>
+      <!-- Device icons container -->
+      <div id="dev-layer" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:20;pointer-events:none"></div>
+
+      <!-- views overlays -->
+      <div class="voverlay" id="vwiring"><div id="vwiring-inner" style="min-width:680px"></div></div>
+      <div class="voverlay" id="vschema"><div id="vschema-inner" style="min-width:680px"></div></div>
+
+      <!-- TGBT box (draggable) -->
+      <div class="tgbt-box" id="tgbt-el" style="left:20px;top:20px;display:none">
+        <div class="tgbt-title">⚡ TGBT</div>
+        <div class="tgbt-sub">Tableau principal</div>
+        <div class="tgbt-cp" id="tgbt-cp" title="Point de raccordement TGBT"></div>
+      </div>
+      <!-- Lengths overlay -->
+      <div class="voverlay" id="vlengths"><div id="vlengths-inner" style="min-width:600px;padding:8px"></div></div>
+      <!-- Powers overlay -->
+      <div class="voverlay" id="vpowers"><div id="vpowers-inner" style="min-width:680px;padding:8px"></div></div>
+      <!-- Devices table overlay -->
+      <div class="voverlay" id="vdevices"><div id="vdevices-inner" style="min-width:680px;padding:8px"></div></div>
+      <!-- Building overview -->
+      <div class="voverlay" id="vbuilding"><div id="vbuilding-inner" style="min-width:680px;padding:8px"></div></div>
+      <!-- empty state -->
+      <div id="estate" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;opacity:.36;pointer-events:none;z-index:5">
+        <svg width="52" height="52" viewBox="0 0 52 52" fill="none"><rect x="5" y="5" width="42" height="42" rx="8" stroke="#5b8af7" stroke-width="1.2" stroke-dasharray="4 3"/><path d="M26 18v16M18 26h16" stroke="#5b8af7" stroke-width="1.7" stroke-linecap="round"/></svg>
+        <p style="font-size:12px;color:var(--txt2);text-align:center">Importez un plan puis "Analyser"</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ MODALS ════ -->
+<!-- Add device -->
+<div class="modal-ov" id="modal-dev" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal"><div class="modal-title">Ajouter un appareil<button class="mclose" onclick="document.getElementById('modal-dev').classList.remove('open')">×</button></div><div id="mdevlist"></div></div>
+</div>
+<!-- Add protection -->
+<div class="modal-ov" id="modal-prot" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal"><div class="modal-title">Protection NFC 15-100<button class="mclose" onclick="document.getElementById('modal-prot').classList.remove('open')">×</button></div><div id="mprotlist"></div></div>
+</div>
+<!-- Add/change room -->
+<div class="modal-ov" id="modal-room" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal"><div class="modal-title" id="modal-room-title">Ajouter une pièce<button class="mclose" onclick="document.getElementById('modal-room').classList.remove('open')">×</button></div><div id="mroomlist"></div></div>
+</div>
+
+<!-- Context menu -->
+<div class="ctx-menu" id="ctx-menu">
+  <div class="ctx-item" id="ctx-change" onclick="ctxChangeRoom()">🔄 Changer de type</div>
+  <div class="ctx-item" id="ctx-addv"   onclick="ctxAddVertex()">✦ Ajouter un sommet</div>
+  <div class="ctx-item" id="ctx-simplify" onclick="simplifySelected()">⬜ Simplifier en rect.</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" id="ctx-adddev" onclick="ctxAddDevice()">🔌 Ajouter un appareil</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item danger" id="ctx-del" onclick="ctxDeleteRoom()">🗑 Supprimer la pièce</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   CONSTANTS & STATE
+═══════════════════════════════════════════════════════════ */
+const ROOM_COLORS=['#4A90D9','#E8734A','#5CB85C','#9B59B6','#F39C12','#E91E63','#00BCD4','#FF5722','#607D8B','#8BC34A'];
+const CMAP={'éclairage':'#f5a524','PC':'#5b8af7','VMC':'#3ecf8e','dédié':'#f87171','dédié cuisson':'#f87171','dédié four':'#f87171','dédié IRVE':'#f87171','commande':'#7c5cf6','courants faibles':'#8890a8','PC Z2':'#00BCD4'};
+
+const NFC={
+  salon:        {label:'Salon / Séjour',  icon:'🛋',devs:[{id:'outlet_16a',name:'Prise 16A',icon:'🔌',power:3680,amp:16,circuit:'PC',qty:5},{id:'light_ceiling',name:'Plafonnier LED',icon:'💡',power:40,amp:0.2,circuit:'éclairage',qty:1},{id:'ac_unit',name:'Climatiseur',icon:'❄️',power:2500,amp:11,circuit:'dédié',qty:1},{id:'tv_outlet',name:'Prise TV/RJ45',icon:'📺',power:0,amp:0,circuit:'courants faibles',qty:1}],prots:[{id:'rcd_30',name:'DDR 30mA',icon:'🛡️',spec:'30mA/40A',type:'rcd',amp:40,color:'#f5a524'},{id:'cb_16a',name:'Disj. 16A',icon:'⚡',spec:'16A courbe C',type:'cb',amp:16,color:'#5b8af7'}]},
+  chambre:      {label:'Chambre',         icon:'🛏',devs:[{id:'outlet_16a',name:'Prise 16A',icon:'🔌',power:3680,amp:16,circuit:'PC',qty:3},{id:'light_ceiling',name:'Plafonnier LED',icon:'💡',power:40,amp:0.2,circuit:'éclairage',qty:1},{id:'ac_unit',name:'Climatiseur',icon:'❄️',power:2000,amp:9,circuit:'dédié',qty:1}],prots:[{id:'rcd_30',name:'DDR 30mA',icon:'🛡️',spec:'30mA/40A',type:'rcd',amp:40,color:'#f5a524'}]},
+  cuisine:      {label:'Cuisine',         icon:'🍳',devs:[{id:'outlet_16a',name:'Prise 16A',icon:'🔌',power:3680,amp:16,circuit:'PC',qty:6},{id:'light_ceiling',name:'Plafonnier LED',icon:'💡',power:60,amp:0.3,circuit:'éclairage',qty:2},{id:'hob',name:'Plaque induction',icon:'🔥',power:7200,amp:32,circuit:'dédié cuisson',qty:1},{id:'dishwasher',name:'Lave-vaisselle',icon:'🫧',power:2200,amp:10,circuit:'dédié',qty:1}],prots:[{id:'rcd_30',name:'DDR 30mA',icon:'🛡️',spec:'30mA/40A',type:'rcd',amp:40,color:'#f5a524'},{id:'cb_32a',name:'Disj. 32A',icon:'⚡',spec:'32A courbe C',type:'cb',amp:32,color:'#5b8af7'}]},
+  salle_de_bain:{label:'Salle de bain',   icon:'🚿',devs:[{id:'outlet_shaver',name:'Prise rasoir Z2',icon:'🔌',power:20,amp:0.1,circuit:'PC Z2',qty:1},{id:'light_mirror',name:'Hublot miroir',icon:'💡',power:30,amp:0.2,circuit:'éclairage',qty:1},{id:'towel_heater',name:'Sèche-serviettes',icon:'🌡️',power:1000,amp:4.5,circuit:'dédié',qty:1},{id:'vmr',name:'VMC',icon:'💨',power:30,amp:0.2,circuit:'VMC',qty:1}],prots:[{id:'rcd_30',name:'DDR 30mA',icon:'🛡️',spec:'30mA/40A',type:'rcd',amp:40,color:'#f5a524'},{id:'rcbo_16',name:'RCBO 16A',icon:'🔒',spec:'16A 30mA',type:'rcbo',amp:16,color:'#3ecf8e'}]},
+  couloir:      {label:'Couloir',         icon:'🚪',devs:[{id:'outlet_16a',name:'Prise 16A',icon:'🔌',power:3680,amp:16,circuit:'PC',qty:1},{id:'light_hall',name:'Applique',icon:'💡',power:20,amp:0.1,circuit:'éclairage',qty:1},{id:'doorbell',name:'Sonnette',icon:'🔔',power:5,amp:0,circuit:'courants faibles',qty:1}],prots:[{id:'cb_10a',name:'Disj. 10A',icon:'⚡',spec:'10A courbe C',type:'cb',amp:10,color:'#5b8af7'}]},
+  bureau:       {label:'Bureau',          icon:'💼',devs:[{id:'outlet_16a',name:'Prise 16A',icon:'🔌',power:3680,amp:16,circuit:'PC',qty:4},{id:'light_ceiling',name:'Plafonnier LED',icon:'💡',power:40,amp:0.2,circuit:'éclairage',qty:1},{id:'rj45',name:'Prise RJ45',icon:'🌐',power:0,amp:0,circuit:'courants faibles',qty:2}],prots:[{id:'rcd_30',name:'DDR 30mA',icon:'🛡️',spec:'30mA/40A',type:'rcd',amp:40,color:'#f5a524'}]},
+  garage:       {label:'Garage',          icon:'🚗',devs:[{id:'outlet_16a',name:'Prise 16A',icon:'🔌',power:3680,amp:16,circuit:'PC',qty:2},{id:'light_ceiling',name:'Réglette LED',icon:'💡',power:60,amp:0.3,circuit:'éclairage',qty:2},{id:'ev_charger',name:'Borne IRVE',icon:'⚡',power:7400,amp:32,circuit:'dédié IRVE',qty:1}],prots:[{id:'rcd_30',name:'DDR 30mA',icon:'🛡️',spec:'30mA/40A',type:'rcd',amp:40,color:'#f5a524'},{id:'cb_32a',name:'Disj. 32A',icon:'⚡',spec:'32A courbe C',type:'cb',amp:32,color:'#5b8af7'}]},
+  wc:           {label:'WC',              icon:'🚽',devs:[{id:'light_ceiling',name:'Plafonnier',icon:'💡',power:15,amp:0.1,circuit:'éclairage',qty:1},{id:'vmr',name:'Extracteur',icon:'💨',power:20,amp:0.1,circuit:'VMC',qty:1}],prots:[{id:'cb_10a',name:'Disj. 10A',icon:'⚡',spec:'10A courbe C',type:'cb',amp:10,color:'#5b8af7'}]},
+  buanderie:    {label:'Buanderie',       icon:'👕',devs:[{id:'washing',name:'Lave-linge',icon:'👕',power:2200,amp:10,circuit:'dédié',qty:1},{id:'outlet_16a',name:'Prise 16A',icon:'🔌',power:3680,amp:16,circuit:'PC',qty:2},{id:'light_ceiling',name:'Plafonnier',icon:'💡',power:20,amp:0.1,circuit:'éclairage',qty:1}],prots:[{id:'rcd_30',name:'DDR 30mA',icon:'🛡️',spec:'30mA/40A',type:'rcd',amp:40,color:'#f5a524'}]},
+  terrasse:     {label:'Terrasse',        icon:'🌿',devs:[{id:'outlet_16a',name:'Prise ext. 16A',icon:'🔌',power:3680,amp:16,circuit:'PC',qty:2},{id:'light_wall',name:'Applique ext.',icon:'💡',power:20,amp:0.1,circuit:'éclairage',qty:2}],prots:[{id:'rcd_30',name:'DDR 30mA',icon:'🛡️',spec:'30mA/40A',type:'rcd',amp:40,color:'#f5a524'}]},
+};
+
+const ALL_DEV=[
+  {id:'light_ceiling',name:'Plafonnier LED',icon:'💡',power:40,amp:0.2,circuit:'éclairage'},
+  {id:'light_spot',name:'Spot encastré',icon:'💡',power:10,amp:0.05,circuit:'éclairage'},
+  {id:'light_wall',name:'Applique murale',icon:'🪔',power:20,amp:0.1,circuit:'éclairage'},
+  {id:'switch',name:'Interrupteur',icon:'🔲',power:0,amp:0,circuit:'commande'},
+  {id:'switch2',name:'Va-et-vient',icon:'🔀',power:0,amp:0,circuit:'commande'},
+  {id:'outlet_16a',name:'Prise 16A',icon:'🔌',power:3680,amp:16,circuit:'PC'},
+  {id:'outlet_20a',name:'Prise 20A',icon:'🔌',power:4600,amp:20,circuit:'PC'},
+  {id:'outlet_32a',name:'Prise 32A',icon:'🍳',power:7360,amp:32,circuit:'dédié'},
+  {id:'outlet_shaver',name:'Prise rasoir Z2',icon:'🔌',power:20,amp:0.1,circuit:'PC Z2'},
+  {id:'ac_unit',name:'Climatiseur',icon:'❄️',power:2500,amp:11,circuit:'dédié'},
+  {id:'hob',name:'Plaque induction',icon:'🔥',power:7200,amp:32,circuit:'dédié cuisson'},
+  {id:'oven',name:'Four électrique',icon:'🍳',power:3600,amp:16,circuit:'dédié four'},
+  {id:'dishwasher',name:'Lave-vaisselle',icon:'🫧',power:2200,amp:10,circuit:'dédié'},
+  {id:'washing',name:'Lave-linge',icon:'👕',power:2200,amp:10,circuit:'dédié'},
+  {id:'towel_heater',name:'Sèche-serviettes',icon:'🌡️',power:1000,amp:4.5,circuit:'dédié'},
+  {id:'vmr',name:'VMC / Extracteur',icon:'💨',power:30,amp:0.2,circuit:'VMC'},
+  {id:'tv_outlet',name:'Prise TV/RJ45',icon:'📺',power:0,amp:0,circuit:'courants faibles'},
+  {id:'rj45',name:'Prise RJ45',icon:'🌐',power:0,amp:0,circuit:'courants faibles'},
+  {id:'doorbell',name:'Sonnette',icon:'🔔',power:5,amp:0,circuit:'courants faibles'},
+  {id:'ev_charger',name:'Borne IRVE',icon:'⚡',power:7400,amp:32,circuit:'dédié IRVE'},
+  {id:'thermostat',name:'Thermostat',icon:'🌡️',power:5,amp:0,circuit:'commande'},
+];
+
+const ALL_PROT=[
+  {id:'cb_10a',name:'Disjoncteur 10A',icon:'⚡',spec:'10A courbe C',type:'cb',amp:10,color:'#5b8af7'},
+  {id:'cb_16a',name:'Disjoncteur 16A',icon:'⚡',spec:'16A courbe C',type:'cb',amp:16,color:'#5b8af7'},
+  {id:'cb_20a',name:'Disjoncteur 20A',icon:'⚡',spec:'20A courbe C',type:'cb',amp:20,color:'#5b8af7'},
+  {id:'cb_32a',name:'Disjoncteur 32A',icon:'⚡',spec:'32A courbe C',type:'cb',amp:32,color:'#5b8af7'},
+  {id:'rcd_30',name:'DDR 30mA type A',icon:'🛡️',spec:'30mA / 40A',type:'rcd',amp:40,color:'#f5a524'},
+  {id:'rcd_300',name:'DDR 300mA type AC',icon:'🛡️',spec:'300mA / 63A',type:'rcd',amp:63,color:'#f5a524'},
+  {id:'rcbo_16',name:'RCBO 16A / 30mA',icon:'🔒',spec:'16A 30mA intég',type:'rcbo',amp:16,color:'#3ecf8e'},
+  {id:'rcbo_20',name:'RCBO 20A / 30mA',icon:'🔒',spec:'20A 30mA intég',type:'rcbo',amp:20,color:'#3ecf8e'},
+  {id:'surge',name:'Parafoudre T1+T2',icon:'⛈️',spec:'8/20µs',type:'spd',amp:0,color:'#f87171'},
+  {id:'fuse_16',name:'Fusible 16A gG',icon:'🔧',spec:'16A gG 500V',type:'fuse',amp:16,color:'#8890a8'},
+  {id:'isol',name:'Sectionneur 63A',icon:'🔓',spec:'63A 230V',type:'iso',amp:63,color:'#8890a8'},
+  {id:'contactor',name:'Contacteur HP/HC',icon:'🔁',spec:'40A 2P 230V',type:'con',amp:40,color:'#7c5cf6'},
+  {id:'timer',name:'Horloge programmable',icon:'⏰',spec:'16A 230V',type:'tim',amp:16,color:'#7c5cf6'},
+];
+
+// App state
+/* ══════════════════════════════════════════════════════════════
+   BUILDING & APARTMENT STATE
+══════════════════════════════════════════════════════════════ */
+function makeAptState(name, floor){
+  return {
+    id:'apt_'+(++_aptId), name:name||'Appartement 1', floor:floor||'RDC',
+    rooms:[], wires:[], bgDataUrl:null,
+    tgbtPos:{x:20,y:20,visible:false},
+    ceilH:2.5, planWidthM:12, calibPixels:0, calibMeters:0,
+    view:'plan', selectedRoomId:null,
+  };
+}
+let _aptId=0, _rid=0;
+let modalDevRoom=null, modalProtRoom=null, modalRoomTarget=null, ctxRoomId=null;
+
+const BUILDING={ name:'Mon Immeuble', apts:[], currentAptId:null };
+
+const UI={
+  mode:'cv', showZones:true, showDevices:true, showWires:true,
+  zoneOp:15, bgOp:35, wiringMode:false, wireStart:null,
+  addingVertex:false, calibMode:false, calibPt1:null, selectedWireId:null,
+  zoomLevel:1, panX:0, panY:0,
+};
+
+// S is a live proxy-like object merging current apt + UI
+let S={};
+function syncS(){
+  const apt=curApt(); if(!apt) return;
+  S={
+    get rooms(){ return apt.rooms; },       set rooms(v){ apt.rooms=v; },
+    get wires(){ return apt.wires; },       set wires(v){ apt.wires=v; },
+    get bgDataUrl(){ return apt.bgDataUrl; }, set bgDataUrl(v){ apt.bgDataUrl=v; },
+    get selectedRoomId(){ return apt.selectedRoomId; }, set selectedRoomId(v){ apt.selectedRoomId=v; },
+    get view(){ return apt.view; },         set view(v){ apt.view=v; },
+    get calibPixels(){ return apt.calibPixels; }, set calibPixels(v){ apt.calibPixels=v; },
+    get calibMeters(){ return apt.calibMeters; },  set calibMeters(v){ apt.calibMeters=v; },
+    get mode(){ return UI.mode; },           set mode(v){ UI.mode=v; },
+    get showZones(){ return UI.showZones; }, set showZones(v){ UI.showZones=v; },
+    get showDevices(){ return UI.showDevices; }, set showDevices(v){ UI.showDevices=v; },
+    get showWires(){ return UI.showWires; }, set showWires(v){ UI.showWires=v; },
+    get zoneOp(){ return UI.zoneOp; },      set zoneOp(v){ UI.zoneOp=v; },
+    get bgOp(){ return UI.bgOp; },          set bgOp(v){ UI.bgOp=v; },
+    get wiringMode(){ return UI.wiringMode; }, set wiringMode(v){ UI.wiringMode=v; },
+    get wireStart(){ return UI.wireStart; }, set wireStart(v){ UI.wireStart=v; },
+    get addingVertex(){ return UI.addingVertex; }, set addingVertex(v){ UI.addingVertex=v; },
+    get calibMode(){ return UI.calibMode; }, set calibMode(v){ UI.calibMode=v; },
+    get calibPt1(){ return UI.calibPt1; },  set calibPt1(v){ UI.calibPt1=v; },
+    get selectedWireId(){ return UI.selectedWireId; }, set selectedWireId(v){ UI.selectedWireId=v; },
+    get zoomLevel(){ return UI.zoomLevel; }, set zoomLevel(v){ UI.zoomLevel=v; },
+    get panX(){ return UI.panX; }, set panX(v){ UI.panX=v; },
+    get panY(){ return UI.panY; }, set panY(v){ UI.panY=v; },
+  };
+}
+
+function getApt(id){ return BUILDING.apts.find(a=>a.id===id)||BUILDING.apts[0]; }
+function curApt(){ return getApt(BUILDING.currentAptId)||BUILDING.apts[0]; }
+
+function switchApt(aptId){
+  UI.selectedWireId=null; UI.wireStart=null; UI.wiringMode=false;
+  UI.addingVertex=false; UI.calibMode=false;
+  BUILDING.currentAptId=aptId;
+  syncS();
+  renderAptTabs();
+  // Restore bg image
+  const apt=curApt();
+  const bg=document.getElementById('plan-bg');
+  if(apt.bgDataUrl){ bg.src=apt.bgDataUrl; bg.style.display='block'; bg.style.opacity=(UI.bgOp||35)/100; }
+  else { bg.src=''; bg.style.display='none'; }
+  // Restore TGBT
+  const tel=document.getElementById('tgbt-el');
+  if(tel){ tel.style.left=apt.tgbtPos.x+'px'; tel.style.top=apt.tgbtPos.y+'px'; tel.style.display=apt.tgbtPos.visible?'block':'none'; }
+  // Restore inputs
+  const ch=document.getElementById('ceiling-h'); if(ch) ch.value=apt.ceilH||2.5;
+  const pw=document.getElementById('plan-width-m'); if(pw) pw.value=apt.planWidthM||12;
+  // Hide building overview
+  document.getElementById('vbuilding').classList.remove('show');
+  document.getElementById('bld-overview-tab').classList.remove('active');
+  // Restore view tabs
+  document.querySelectorAll('.vtab').forEach(t=>t.classList.remove('on'));
+  const vtId='vtab-'+apt.view; const vt=document.getElementById(vtId)||document.getElementById('vtab-plan');
+  vt.classList.add('on');
+  setView(apt.view||'plan', vt);
+}
+
+function addApartment(name){
+  const n=BUILDING.apts.length+1;
+  const floors=['RDC','1er étage','2e étage','3e étage','4e étage','5e étage'];
+  const floor=floors[n-1]||n+'e étage';
+  const apt=makeAptState(name||('Appartement '+n), floor);
+  BUILDING.apts.push(apt);
+  BUILDING.currentAptId=apt.id;
+  syncS(); renderAptTabs(); analyzePlan();
+  toast('🏠 '+apt.name+' ajouté');
+}
+
+function renameApt(aptId, el){
+  const apt=getApt(aptId); if(!apt) return;
+  const inp=document.createElement('input');
+  inp.className='apt-name-input'; inp.value=apt.name;
+  inp.onclick=e=>e.stopPropagation();
+  inp.onblur=inp.onkeydown=function(e){
+    if(e.type==='keydown'&&e.key!=='Enter'&&e.key!=='Escape') return;
+    apt.name=inp.value.trim()||apt.name;
+    renderAptTabs();
+  };
+  el.replaceWith(inp); inp.focus(); inp.select();
+}
+
+function deleteApt(aptId, e){
+  e.stopPropagation();
+  if(BUILDING.apts.length<=1){ toast('Un appartement minimum'); return; }
+  if(!confirm('Supprimer cet appartement ?')) return;
+  BUILDING.apts=BUILDING.apts.filter(a=>a.id!==aptId);
+  if(BUILDING.currentAptId===aptId) BUILDING.currentAptId=BUILDING.apts[0].id;
+  syncS(); renderAptTabs(); renderAll();
+  toast('Appartement supprimé');
+}
+
+function renderAptTabs(){
+  const bar=document.getElementById('apt-bar');
+  bar.querySelectorAll('.apt-tab').forEach(e=>e.remove());
+  const addBtn=bar.querySelector('.apt-add');
+  BUILDING.apts.forEach(apt=>{
+    const t=document.createElement('div');
+    t.className='apt-tab'+(apt.id===BUILDING.currentAptId?' active':'');
+    t.innerHTML=`<div class="apt-dot"></div><span ondblclick="renameApt('${apt.id}',this)">${apt.name}</span><span class="apt-close" onclick="deleteApt('${apt.id}',event)">×</span>`;
+    t.addEventListener('click',()=>switchApt(apt.id));
+    bar.insertBefore(t, addBtn);
+  });
+}
+
+/* ── Building overview ────────────────────────────────────────── */
+function showBuildingOverview(){
+  document.getElementById('vbuilding').classList.add('show');
+  document.getElementById('bld-overview-tab').classList.add('active');
+  document.querySelectorAll('.apt-tab').forEach(t=>t.classList.remove('active'));
+  buildBuildingOverview();
+}
+
+function buildBuildingOverview(){
+  const cont=document.getElementById('vbuilding-inner');
+  let totalPInst=0,totalPEff=0,totalDevs=0,totalRooms=0;
+  const allDevices={};
+
+  const aptStats=BUILDING.apts.map(apt=>{
+    let pInst=0,pEff=0,devC=0;
+    apt.rooms.forEach(room=>{ room.devices.forEach(d=>{ if(!d.qty)return; const pf=getPFactor(d.circuit); const pi=d.power*d.qty; pInst+=pi; pEff+=pi*pf.ks*pf.ku; devC+=d.qty; if(!allDevices[d.id]) allDevices[d.id]={name:d.name,icon:d.icon,circuit:d.circuit,power:d.power,qty:0,pInst:0}; allDevices[d.id].qty+=d.qty; allDevices[d.id].pInst+=pi; }); });
+    totalPInst+=pInst; totalPEff+=pEff; totalDevs+=devC; totalRooms+=apt.rooms.length;
+    const amp=Math.ceil(pEff/230/1.25/10)*10;
+    return {id:apt.id,name:apt.name,floor:apt.floor,rooms:apt.rooms.length,devices:devC,pInst,pEff,amp};
+  });
+
+  const totalAmp=Math.ceil(totalPEff/230/1.25/10)*10;
+  const mainBreaker=totalAmp>63?100:totalAmp>40?63:totalAmp>25?40:25;
+
+  let html=`<div class="view-header">
+    <span class="view-title">🏢 Bilan immeuble — ${BUILDING.name}</span>
+    <div class="export-btns">
+      <button class="exp-btn" onclick="exportBuildingCSV()">⬇ CSV Immeuble</button>
+      <button class="exp-btn pdf" onclick="exportViewPDF('vbuilding-inner','immeuble')">⬇ PDF</button>
+      <button class="tbtn" onclick="renameBuilding()" style="height:28px;font-size:11px">✏ Renommer</button>
+    </div></div>
+
+  <div class="summary-cards">
+    <div class="sum-card"><div class="sum-val">${BUILDING.apts.length}</div><div class="sum-label">Appartements</div></div>
+    <div class="sum-card"><div class="sum-val">${totalRooms}</div><div class="sum-label">Pièces</div></div>
+    <div class="sum-card"><div class="sum-val">${totalDevs}</div><div class="sum-label">Appareils</div></div>
+    <div class="sum-card accent"><div class="sum-val">${(totalPEff/1000).toFixed(2)} kW</div><div class="sum-label">P efficace totale</div></div>
+    <div class="sum-card" style="border-color:var(--warn)"><div class="sum-val" style="color:var(--warn)">${totalAmp}A</div><div class="sum-label">I totale</div></div>
+    <div class="sum-card ok"><div class="sum-val">${mainBreaker}A</div><div class="sum-label">Disj. immeuble</div></div>
+  </div>
+
+  <h3 style="font-size:11px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Par appartement</h3>
+  <div class="bld-grid">`;
+  aptStats.forEach(a=>{ html+=`<div class="apt-card" onclick="switchApt('${a.id}')">
+    <div class="apt-card-name"><div style="width:8px;height:8px;border-radius:50%;background:var(--acc2);flex-shrink:0"></div><span>${a.name}</span><span style="margin-left:auto;font-size:10px;color:var(--txt3)">${a.floor}</span></div>
+    <div style="font-size:10px;color:var(--txt3)">${a.rooms} pièces · ${a.devices} appareils</div>
+    <div class="apt-card-stats">
+      <div class="apt-stat"><div class="apt-stat-val" style="color:var(--warn)">${(a.pInst/1000).toFixed(1)}</div><div class="apt-stat-lbl">kW inst.</div></div>
+      <div class="apt-stat"><div class="apt-stat-val" style="color:var(--acc)">${(a.pEff/1000).toFixed(1)}</div><div class="apt-stat-lbl">kW eff.</div></div>
+      <div class="apt-stat"><div class="apt-stat-val" style="color:var(--ok)">${a.amp}A</div><div class="apt-stat-lbl">Disj.</div></div>
+    </div></div>`; });
+
+  html+=`</div>
+  <h3 style="font-size:11px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;margin-top:14px">Bilan de puissance global</h3>
+  <div style="overflow-x:auto;margin-bottom:14px"><table class="data-table">
+    <thead><tr><th>Appartement</th><th>Étage</th><th>Pièces</th><th>Appareils</th><th>P inst. (W)</th><th>P eff. (W)</th><th>Disj. (A)</th><th>%</th></tr></thead><tbody>`;
+  aptStats.forEach(a=>{ const pct=totalPEff>0?(a.pEff/totalPEff*100).toFixed(1):'0'; html+=`<tr><td style="color:var(--acc);cursor:pointer" onclick="switchApt('${a.id}')">${a.name}</td><td style="color:var(--txt3)">${a.floor}</td><td class="num">${a.rooms}</td><td class="num">${a.devices}</td><td class="num">${Math.round(a.pInst)}</td><td class="hi">${Math.round(a.pEff)}</td><td class="num" style="color:var(--acc)">${a.amp}</td><td class="num">${pct}%</td></tr>`; });
+  html+=`<tr style="font-weight:600;border-top:2px solid var(--brd)"><td colspan="4">TOTAL</td><td class="num">${Math.round(totalPInst)}</td><td class="hi">${Math.round(totalPEff)}</td><td class="num" style="color:var(--acc)">${totalAmp}</td><td class="num">100%</td></tr></tbody></table></div>
+
+  <h3 style="font-size:11px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Tous appareils confondus</h3>
+  <div style="overflow-x:auto"><table class="data-table">
+    <thead><tr><th>Appareil</th><th>Circuit</th><th>Qté totale</th><th>P unit. (W)</th><th>P totale (W)</th><th>P eff. (W)</th></tr></thead><tbody>`;
+  Object.values(allDevices).sort((a,b)=>b.pInst-a.pInst).forEach(d=>{ const pf=getPFactor(d.circuit); const pEff=Math.round(d.pInst*pf.ks*pf.ku); const col=CMAP[d.circuit]||'#8890a8'; html+=`<tr><td>${d.icon} ${d.name}</td><td><span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:${col};margin-right:4px"></span>${d.circuit}</td><td class="num">${d.qty}</td><td class="num">${d.power}</td><td class="num">${Math.round(d.pInst)}</td><td class="hi">${pEff}</td></tr>`; });
+  html+=`</tbody></table></div>`;
+  cont.innerHTML=html;
+}
+
+function renameBuilding(){ const n=prompt('Nom du projet :',BUILDING.name); if(n&&n.trim()) BUILDING.name=n.trim(); buildBuildingOverview(); }
+
+function exportBuildingCSV(){
+  const bom='﻿';
+  const esc=v=>{ const s=String(v??''); return s.includes(',')||s.includes('"')?`"${s.replace(/"/g,'""')}"`:''+s; };
+  const ln=r=>r.map(esc).join(',');
+  let csv=bom+ln(['BILAN IMMEUBLE',BUILDING.name,'Date',new Date().toLocaleDateString('fr-FR')])+'\r\n';
+  csv+=ln(['APPARTEMENTS','','','','','',''])+'\r\n';
+  csv+=ln(['Nom','Étage','Pièces','Appareils','P inst. (W)','P eff. (W)','Disj. (A)'])+'\r\n';
+  BUILDING.apts.forEach(apt=>{
+    let pInst=0,pEff=0,devC=0;
+    apt.rooms.forEach(r=>{ r.devices.forEach(d=>{ if(!d.qty)return; const pf=getPFactor(d.circuit); pInst+=d.power*d.qty; pEff+=d.power*d.qty*pf.ks*pf.ku; devC+=d.qty; }); });
+    const amp=Math.ceil(pEff/230/1.25/10)*10;
+    csv+=ln([apt.name,apt.floor,apt.rooms.length,devC,Math.round(pInst),Math.round(pEff),amp])+'\r\n';
+    csv+=ln(['','Appareil','Pièce','Circuit','Qté','P unit.','P totale','Disj.'])+'\r\n';
+    apt.rooms.forEach(r=>{ r.devices.forEach(d=>{ if(!d.qty)return; const cb=d.amp>=32?32:d.amp>=16?16:d.amp>=10?10:6; csv+=ln(['',d.name,r.name,d.circuit,d.qty,d.power,d.power*d.qty,cb])+'\r\n'; }); });
+    csv+='\r\n';
+  });
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='immeuble_thunder.csv'; a.click();
+  toast('Export immeuble CSV généré');
+}
+
+function initBuilding(){
+  const apt=makeAptState('Appartement 1','RDC');
+  BUILDING.apts.push(apt); BUILDING.currentAptId=apt.id; syncS(); renderAptTabs();
+}
+
+function mkRoomId(){ return 'r_'+(++_rid); }
+
+/* ═══════════════════════════════════════════════════════════
+   ROOM HELPERS
+═══════════════════════════════════════════════════════════ */
+function nfcRoom(type, pct){
+  const rule=NFC[type]||NFC.salon;
+  const {x_pct=5,y_pct=5,w_pct=30,h_pct=35}=pct||{};
+  // Build polygon as rectangle [TL,TR,BR,BL]
+  const pts=[
+    {x:x_pct,           y:y_pct},
+    {x:x_pct+w_pct,     y:y_pct},
+    {x:x_pct+w_pct,     y:y_pct+h_pct},
+    {x:x_pct,           y:y_pct+h_pct},
+  ];
+  return {
+    id:mkRoomId(), type, name:rule.label,
+    color:ROOM_COLORS[S.rooms.length%ROOM_COLORS.length],
+    pts,   // [{x_pct, y_pct}] polygon vertices in %
+    devices:[...rule.devs.map(d=>({wallH:0.3,...d}))],
+    protections:[...rule.prots.map(p=>({...p}))],
+  };
+}
+
+// Convert server response rooms (rect) to polygon rooms
+function serverToRoom(r,i){
+  const rule=NFC[r.type]||NFC.salon;
+  return {
+    id:mkRoomId(), type:r.type,
+    name:r.name||rule.label,
+    color:ROOM_COLORS[i%ROOM_COLORS.length],
+    pts:[
+      {x:r.x_pct,           y:r.y_pct},
+      {x:r.x_pct+r.w_pct,   y:r.y_pct},
+      {x:r.x_pct+r.w_pct,   y:r.y_pct+r.h_pct},
+      {x:r.x_pct,           y:r.y_pct+r.h_pct},
+    ],
+    devices:(r.devices||rule.devs).map(d=>({wallH:0.3,...d})),
+    protections:(r.protections||rule.prots).map(p=>({...p})),
+  };
+}
+
+function polyCenter(pts){
+  const n=pts.length;
+  return{x:pts.reduce((s,p)=>s+p.x,0)/n, y:pts.reduce((s,p)=>s+p.y,0)/n};
+}
+
+/* ═══════════════════════════════════════════════════════════
+   API / ANALYZE
+═══════════════════════════════════════════════════════════ */
+async function checkApiStatus(){
+  try{
+    const r=await fetch('/api/status');
+    const d=await r.json();
+    const badge=document.getElementById('api-badge');
+    if(S.mode==='cv'){
+      badge.textContent=d.cv_available?'🔍 CV prêt':'✗ CV indispo';
+      badge.style.color=d.cv_available?'var(--ok)':'var(--err)';
+    } else {
+      badge.textContent=d.api_key_configured?'✓ IA prête':'✗ Clé manquante';
+      badge.style.color=d.api_key_configured?'var(--acc)':'var(--err)';
+    }
+  }catch(e){}
+}
+
+async function analyzePlan(){
+  const btn=document.getElementById('abtn');
+  btn.classList.add('loading');
+  const fi=document.getElementById('file-input');
+  const fd=new FormData();
+  fd.append('mode',S.mode);
+  if(fi.files[0]) fd.append('image',fi.files[0]);
+  try{
+    const r=await fetch('/api/analyze',{method:'POST',body:fd});
+    const d=await r.json();
+    // Convert server rooms to polygon rooms
+    _rid=0;
+    S.rooms=(d.rooms||[]).map((r,i)=>serverToRoom(r,i));
+    S.wires=[];
+    syncS(); // ensure proxy is fresh
+    const ml=S.mode==='cv'?'OpenCV+OCR':'Claude IA';
+    if(d.demo) showStatus('Démo activée — importez un plan','warn');
+    else showStatus(`✓ ${S.rooms.length} pièces (${ml})`,'ok');
+    renderAll();
+  }catch(e){showStatus('Erreur serveur','err');}
+  finally{btn.classList.remove('loading');}
+}
+
+function setMode(m){
+  S.mode=m;
+  document.getElementById('mbtn-ai').classList.toggle('on',m==='ai');
+  document.getElementById('mbtn-cv').classList.toggle('on',m==='cv');
+  document.getElementById('abtn-txt').textContent=m==='cv'?'🔍 Analyser':'✦ Analyser';
+  checkApiStatus();
+  toast(m==='cv'?'Mode OpenCV + OCR local':'Mode Claude Vision IA');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   RENDER ALL
+═══════════════════════════════════════════════════════════ */
+function renderAll(){
+  syncS();  // ensure S reflects current apartment
+  renderSidebar();
+  renderPlan();
+  updateBilan();
+  if(S.view==='schema') buildSchema();
+  else if(S.view==='wiring') buildWiringView();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SIDEBAR
+═══════════════════════════════════════════════════════════ */
+function renderSidebar(){
+  const list=document.getElementById('rlist');
+  document.getElementById('rcntbadge').textContent=S.rooms.length+' pièces';
+  list.innerHTML='';
+  S.rooms.forEach(room=>{
+    const totalD=room.devices.reduce((s,d)=>s+d.qty,0);
+    const card=document.createElement('div');
+    card.className='rcard open';
+    card.id='rc-'+room.id;
+    const protH=(room.protections||[]).map((p,pi)=>`
+      <div class="prow">
+        <span class="pio">${p.icon}</span>
+        <div class="pinf"><div class="pnm" style="color:${p.color||'#f87171'}">${p.name}</div><div class="psp">${p.spec}</div></div>
+        <button class="qbtn" onclick="removeProt('${room.id}',${pi})" style="color:var(--err)">×</button>
+      </div>`).join('');
+    card.innerHTML=`
+      <div class="rhead" onclick="toggleCard('${room.id}')">
+        <div class="rdot" style="background:${room.color}"></div>
+        <span class="rname" id="rname-${room.id}" ondblclick="startRenameRoom('${room.id}')" title="Double-clic pour renommer" style="cursor:text">${NFC[room.type]?.icon||'🏠'} ${room.name}</span>
+        <div class="ractions" onclick="event.stopPropagation()">
+          <button class="raction" title="Changer de type" onclick="openChangeRoom('${room.id}')">⇄</button>
+          <button class="raction del" title="Supprimer" onclick="deleteRoom('${room.id}')">🗑</button>
+        </div>
+        <span class="chev">›</span>
+      </div>
+      <div class="rdevices">
+        ${room.devices.map((d,di)=>devRow(room.id,d,di)).join('')}
+        <button class="addbtn" onclick="openDevModal('${room.id}')">+ Appareil</button>
+        <div class="psec">
+          <div class="ptitle">🛡 Protection</div>
+          ${protH}
+          <button class="addpbtn" onclick="openProtModal('${room.id}')">+ Disjoncteur / DDR...</button>
+        </div>
+      </div>`;
+    list.appendChild(card);
+    if(room.id===S.selectedRoomId) card.classList.add('active');
+  });
+}
+
+function devRow(rid,d,di){
+  if(d.qty===0) return '';
+  const hVal=d.wallH||1.0;
+  return `<div class="drow"><span class="dem">${d.icon}</span>
+    <div class="dinf">
+      <div class="dlbl" id="dlbl-${rid}-${di}" ondblclick="startRenameDevice('${rid}',${di})" title="Double-clic pour renommer" style="cursor:text">${d.name}</div>
+      <div class="dmet" style="display:flex;align-items:center;gap:4px">
+        <span>${d.power}W · ${d.amp}A · ${d.circuit}</span>
+        <span style="margin-left:auto;color:var(--txt3);font-size:9px">H:</span>
+        <input type="number" value="${hVal}" min="0" max="6" step="0.1"
+          style="width:32px;background:transparent;border:none;border-bottom:1px solid var(--brd);color:var(--txt3);font-size:9px;font-family:'Space Mono',monospace;padding:0;text-align:right"
+          title="Hauteur de pose en mètres (0=sol, 1=plan de travail, 2.3=plafond...)"
+          onchange="setDeviceHeight('${rid}',${di},this.value)"
+          onclick="event.stopPropagation()">
+        <span style="font-size:9px;color:var(--txt3)">m</span>
+      </div>
+    </div>
+    <div class="qctrl">
+      <button class="qbtn" onclick="chQty('${rid}',${di},-1)">−</button>
+      <span class="qval">${d.qty}</span>
+      <button class="qbtn" onclick="chQty('${rid}',${di},+1)">+</button>
+    </div></div>`;
+}
+
+function setDeviceHeight(rid,di,val){
+  const room=S.rooms.find(r=>r.id===rid); if(!room) return;
+  room.devices[di].wallH=Math.max(0,Math.min(6,parseFloat(val)||1.0));
+  updateLengths(); if(S.view==='lengths') buildLengthsView();
+}
+
+function startRenameDevice(rid,di){
+  const room=S.rooms.find(r=>r.id===rid); if(!room) return;
+  const el=document.getElementById('dlbl-'+rid+'-'+di); if(!el) return;
+  const inp=document.createElement('input');
+  inp.className='dlbl-input'; inp.value=room.devices[di].name;
+  inp.onblur=inp.onkeydown=function(e){
+    if(e.type==='keydown'&&e.key!=='Enter'&&e.key!=='Escape') return;
+    if(e.key==='Escape'){renderSidebar();return;}
+    room.devices[di].name=inp.value.trim()||room.devices[di].name;
+    renderSidebar(); renderPlan();
+  };
+  el.replaceWith(inp); inp.focus(); inp.select();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PLAN RENDERING — SVG POLYGONS
+═══════════════════════════════════════════════════════════ */
+function renderPlan(){
+  const planc=document.getElementById('planc');
+  const W=planc.clientWidth, H=planc.clientHeight;
+  document.getElementById('estate').style.display=S.rooms.length?'none':'flex';
+
+  const svg=document.getElementById('room-svg');
+  svg.innerHTML='';
+
+  if(!S.showZones){ renderDevices(W,H); renderWires(W,H); return; }
+
+  S.rooms.forEach(room=>{
+    // Convert % to px
+    const pxPts=room.pts.map(p=>({x:p.x/100*W, y:p.y/100*H}));
+    const pointsStr=pxPts.map(p=>`${p.x},${p.y}`).join(' ');
+    const cx=pxPts.reduce((s,p)=>s+p.x,0)/pxPts.length;
+    const cy=pxPts.reduce((s,p)=>s+p.y,0)/pxPts.length;
+    const isSelected=room.id===S.selectedRoomId;
+
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('data-room',room.id);
+
+    // Fill polygon
+    const poly=document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    poly.setAttribute('points',pointsStr);
+    poly.setAttribute('fill',room.color);
+    poly.setAttribute('stroke',room.color);
+    poly.setAttribute('stroke-width','1.5');
+    poly.style.fillOpacity=S.zoneOp/100;
+    poly.style.strokeOpacity='0.6';
+    poly.style.cursor='pointer';
+    poly.addEventListener('click',(e)=>{
+      e.stopPropagation();
+      selectRoom(room.id);
+    });
+    poly.addEventListener('contextmenu',(e)=>{
+      e.preventDefault(); e.stopPropagation();
+      showCtxMenu(e,room.id);
+    });
+    // Drag whole room — devices & wires stay solidary
+    poly.addEventListener('mousedown',(e)=>{
+      if(e.button!==0) return;
+      e.stopPropagation(); e.preventDefault();
+      selectRoom(room.id);
+      const planc=document.getElementById('planc');
+      const rect=planc.getBoundingClientRect();
+      const W=planc.clientWidth, H=planc.clientHeight;
+      const startX=e.clientX, startY=e.clientY;
+
+      // Snapshot original positions ONCE before drag starts
+      const origPts=room.pts.map(p=>({...p}));
+      // Snapshot device pixel positions
+      const origDevPos=room.devices.map(d=>
+        d._pos ? d._pos.map(p=>p?{...p}:null) : []
+      );
+      // Snapshot wire endpoints + control points
+      const origWires=S.wires.map(w=>({
+        id:w.id,
+        fromPt:{...w.fromPt},
+        toPt:{...w.toPt},
+        cps:(w.cps||[]).map(cp=>({...cp})),
+      }));
+
+      let moved=false;
+
+      function mv(ev){
+        const dxPct=(ev.clientX-startX)/W*100;
+        const dyPct=(ev.clientY-startY)/H*100;
+        const dxPx=(ev.clientX-startX);
+        const dyPx=(ev.clientY-startY);
+        if(Math.abs(dxPx)>3||Math.abs(dyPx)>3) moved=true;
+        if(!moved) return;
+
+        // Move room vertices (in %)
+        room.pts=origPts.map(p=>({
+          x:Math.max(0,Math.min(100,p.x+dxPct)),
+          y:Math.max(0,Math.min(100,p.y+dyPct))
+        }));
+
+        // Move devices (in px) — use snapshot so no drift
+        room.devices.forEach((d,di)=>{
+          if(!origDevPos[di]) return;
+          d._pos=origDevPos[di].map(p=>
+            p ? {x:p.x+dxPx, y:p.y+dyPx} : null
+          );
+        });
+
+        // Move wire endpoints for wires connected to this room
+        origWires.forEach(ow=>{
+          const w=S.wires.find(x=>x.id===ow.id);
+          if(!w) return;
+          if(w.fromKey&&w.fromKey.startsWith(room.id+'-')||
+             w.fromKey&&w.fromKey.split('_').slice(0,-2).join('_')===room.id){
+            w.fromPt={x:ow.fromPt.x+dxPx, y:ow.fromPt.y+dyPx};
+          }
+          if(w.toKey&&w.toKey.split('_').slice(0,-2).join('_')===room.id){
+            w.toPt={x:ow.toPt.x+dxPx, y:ow.toPt.y+dyPx};
+          }
+          // Move intermediate control points too
+          if(w.cps){
+            w.cps=w.cps.map((cp,ci)=>{
+              const orig=ow.cps&&ow.cps[ci];
+              return orig?{x:orig.x+dxPx,y:orig.y+dyPx}:{...cp};
+            });
+          }
+        });
+        // Also snapshot cps for wires (need to do this before drag)
+        renderPlan();
+      }
+
+      function up(){
+        document.removeEventListener('mousemove',mv);
+        document.removeEventListener('mouseup',up);
+      }
+      document.addEventListener('mousemove',mv);
+      document.addEventListener('mouseup',up);
+    });
+    if(isSelected){ poly.style.fillOpacity=(S.zoneOp/100)*1.8; poly.style.strokeDasharray='none'; }
+    g.appendChild(poly);
+
+    // Label
+    const txt=document.createElementNS('http://www.w3.org/2000/svg','text');
+    txt.setAttribute('x',cx); txt.setAttribute('y',cy-6);
+    txt.setAttribute('text-anchor','middle');
+    txt.setAttribute('class','room-label');
+    txt.setAttribute('fill',room.color);
+    txt.textContent=room.name;
+    g.appendChild(txt);
+
+    // Area label (smaller)
+    const txt2=document.createElementNS('http://www.w3.org/2000/svg','text');
+    txt2.setAttribute('x',cx); txt2.setAttribute('y',cy+10);
+    txt2.setAttribute('text-anchor','middle');
+    txt2.setAttribute('fill',room.color);
+    txt2.setAttribute('font-size','9');
+    txt2.setAttribute('opacity','0.7');
+    txt2.setAttribute('font-family','Space Mono,monospace');
+    txt2.textContent=NFC[room.type]?.icon||'';
+    g.appendChild(txt2);
+
+    // Vertex handles (only for selected)
+    if(isSelected){
+      pxPts.forEach((p,vi)=>{
+        const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+        c.setAttribute('cx',p.x); c.setAttribute('cy',p.y); c.setAttribute('r','6');
+        c.setAttribute('fill',room.color); c.setAttribute('class','room-vertex');
+        c.setAttribute('stroke','#fff'); c.setAttribute('stroke-width','1.5');
+        c.style.cursor='move';
+        c.addEventListener('mousedown',(e)=>{
+          e.stopPropagation();
+          startVertexDrag(e,room.id,vi);
+        });
+        c.addEventListener('contextmenu',(e)=>{
+          e.preventDefault(); e.stopPropagation();
+          removeVertex(room.id,vi);
+        });
+        c.setAttribute('title','Glisser pour déplacer · clic droit pour supprimer');
+        g.appendChild(c);
+      });
+    }
+
+    svg.appendChild(g);
+  });
+
+  renderDevices(W,H);
+  renderWires(W,H);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   VERTEX DRAG
+═══════════════════════════════════════════════════════════ */
+function startVertexDrag(e,roomId,vi){
+  const planc=document.getElementById('planc');
+  const rect=planc.getBoundingClientRect();
+  const W=planc.clientWidth, H=planc.clientHeight;
+  const room=S.rooms.find(r=>r.id===roomId);
+  if(!room) return;
+  e.preventDefault();
+
+  function onMove(ev){
+    const x=Math.max(0,Math.min(100,(ev.clientX-rect.left)/W*100));
+    const y=Math.max(0,Math.min(100,(ev.clientY-rect.top)/H*100));
+    room.pts[vi]={x,y};
+    renderPlan();
+    updateDevicePositionsForRoom(roomId);
+    renderWires(W,H);
+  }
+  function onUp(){ document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp); }
+  document.addEventListener('mousemove',onMove);
+  document.addEventListener('mouseup',onUp);
+}
+
+function removeVertex(roomId,vi){
+  const room=S.rooms.find(r=>r.id===roomId);
+  if(!room||room.pts.length<=3){ toast('Minimum 3 sommets'); return; }
+  room.pts.splice(vi,1);
+  renderPlan();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ADD VERTEX ON PLAN CLICK
+═══════════════════════════════════════════════════════════ */
+function toggleAddVertex(){
+  S.addingVertex=!S.addingVertex;
+  document.getElementById('poly-btn').classList.toggle('on',S.addingVertex);
+  toast(S.addingVertex?'Cliquez sur un bord de pièce pour ajouter un sommet':'Mode sommet désactivé');
+}
+
+function addVertexAtClick(x_pct,y_pct){
+  if(!S.selectedRoomId) return;
+  const room=S.rooms.find(r=>r.id===S.selectedRoomId);
+  if(!room) return;
+  const pts=room.pts;
+  // Find the edge closest to click point
+  let bestEdge=0, bestDist=Infinity;
+  for(let i=0;i<pts.length;i++){
+    const a=pts[i], b=pts[(i+1)%pts.length];
+    const dx=b.x-a.x, dy=b.y-a.y;
+    const t=Math.max(0,Math.min(1,((x_pct-a.x)*dx+(y_pct-a.y)*dy)/(dx*dx+dy*dy)));
+    const px=a.x+t*dx, py=a.y+t*dy;
+    const d=Math.hypot(px-x_pct,py-y_pct);
+    if(d<bestDist){ bestDist=d; bestEdge=i; }
+  }
+  room.pts.splice(bestEdge+1,0,{x:x_pct,y:y_pct});
+  S.addingVertex=false;
+  document.getElementById('poly-btn').classList.remove('on');
+  renderPlan();
+  toast('Sommet ajouté');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SIMPLIFY TO RECT
+═══════════════════════════════════════════════════════════ */
+function simplifySelected(){
+  const room=S.rooms.find(r=>r.id===S.selectedRoomId);
+  if(!room){ toast('Sélectionnez une pièce'); return; }
+  const xs=room.pts.map(p=>p.x), ys=room.pts.map(p=>p.y);
+  const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+  room.pts=[{x:minX,y:minY},{x:maxX,y:minY},{x:maxX,y:maxY},{x:minX,y:maxY}];
+  renderPlan();
+  toast('Pièce simplifiée en rectangle');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DEVICE ICONS
+═══════════════════════════════════════════════════════════ */
+function renderDevices(W,H){
+  const layer=document.getElementById('dev-layer');
+  layer.querySelectorAll('.dico,.cpt,.pbadge').forEach(e=>e.remove());
+  if(!S.showDevices) return;
+
+  S.rooms.forEach(room=>{
+    const center=polyCenter(room.pts);
+    const cx=center.x/100*W, cy=center.y/100*H;
+    const xs=room.pts.map(p=>p.x/100*W), ys=room.pts.map(p=>p.y/100*H);
+    const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+    const zW=maxX-minX, zH=maxY-minY;
+    const pad=10;
+    const cols=Math.max(1,Math.floor((zW-pad*2)/36));
+
+    let slot=0;
+    room.devices.forEach((d,di)=>{
+      if(d.qty===0) return;
+      if(!d._pos) d._pos=[];
+      for(let inst=0;inst<d.qty;inst++){
+        if(!d._pos[inst]){
+          const col=slot%cols, row=Math.floor(slot/cols);
+          d._pos[inst]={x:minX+pad+col*37, y:minY+24+row*39};
+        }
+        const pos=d._pos[inst];
+        const key=`${room.id}_${di}_${inst}`;
+
+        const ic=document.createElement('div');
+        ic.className='dico'; ic.id='dico-'+key;
+        ic.style.cssText=`left:${pos.x}px;top:${pos.y}px;border-color:${room.color}55;pointer-events:all`;
+        ic.textContent=d.icon; ic.title=d.name;
+        ic.addEventListener('mousedown',(e)=>startDevDrag(e,room.id,di,inst,ic));
+        layer.appendChild(ic);
+
+        // Contact point
+        const cp=document.createElement('div');
+        cp.className='cpt'; cp.id='cpt-'+key;
+        cp.style.cssText=`left:${pos.x+23}px;top:${pos.y+23}px;border-color:${room.color};background:${room.color}33;pointer-events:all`;
+        cp.title='Contact câblage';
+        cp.dataset.key=key; cp.dataset.x=pos.x+16; cp.dataset.y=pos.y+16;
+        cp.dataset.circuit=d.circuit; cp.dataset.color=CMAP[d.circuit]||room.color;
+        cp.addEventListener('click',(e)=>{e.stopPropagation();handleContact(cp);});
+        layer.appendChild(cp);
+        slot++;
+      }
+    });
+
+    // Protection badges
+    (room.protections||[]).forEach((p,pi)=>{
+      const bx=maxX-30-(pi*32), by=minY+3;
+      const pb=document.createElement('div');
+      pb.className='pbadge';
+      pb.style.cssText=`left:${bx}px;top:${by}px;border-color:${p.color||'#f87171'}88;pointer-events:all`;
+      pb.textContent=p.icon; pb.title=`${p.name} — ${p.spec}`;
+      layer.appendChild(pb);
+    });
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DEVICE DRAG — wire endpoints follow the device
+═══════════════════════════════════════════════════════════ */
+function startDevDrag(e,roomId,di,inst,el){
+  e.preventDefault();
+  const planc=document.getElementById('planc');
+  const rect=planc.getBoundingClientRect();
+  const ox=e.clientX-rect.left-parseInt(el.style.left);
+  const oy=e.clientY-rect.top-parseInt(el.style.top);
+  el.classList.add('dragging');
+  const key=`${roomId}_${di}_${inst}`;
+
+  function mv(ev){
+    const x=Math.max(0,Math.min(planc.clientWidth-32,ev.clientX-rect.left-ox));
+    const y=Math.max(0,Math.min(planc.clientHeight-32,ev.clientY-rect.top-oy));
+    el.style.left=x+'px'; el.style.top=y+'px';
+    // Update stored position
+    const room=S.rooms.find(r=>r.id===roomId);
+    if(room&&room.devices[di]){ if(!room.devices[di]._pos) room.devices[di]._pos=[]; room.devices[di]._pos[inst]={x,y}; }
+    // Move contact point
+    const cp=document.getElementById('cpt-'+key);
+    if(cp){ cp.style.left=(x+23)+'px'; cp.style.top=(y+23)+'px'; cp.dataset.x=x+16; cp.dataset.y=y+16; }
+    // ★ Update all wires connected to this device
+    updateWiresForDevice(key,x+16,y+16);
+  }
+  function up(){ el.classList.remove('dragging'); document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up); }
+  document.addEventListener('mousemove',mv);
+  document.addEventListener('mouseup',up);
+}
+
+function updateDevicePositionsForRoom(roomId){
+  // Reset positions so devices re-layout within new room shape
+  const room=S.rooms.find(r=>r.id===roomId);
+  if(!room) return;
+  room.devices.forEach(d=>{ d._pos=[]; });
+}
+
+/* ═══════════════════════════════════════════════════════════
+   WIRES — live update when device moves
+═══════════════════════════════════════════════════════════ */
+function updateWiresForDevice(devKey,nx,ny){
+  S.wires.forEach(w=>{
+    if(w.fromKey===devKey) w.fromPt={x:nx,y:ny};
+    if(w.toKey===devKey)   w.toPt  ={x:nx,y:ny};
+  });
+  const planc=document.getElementById('planc');
+  renderWires(planc.clientWidth,planc.clientHeight);
+}
+
+function renderWires(W,H){
+  const svg = document.getElementById('wire-svg');
+  svg.innerHTML = '';
+  if(!S.showWires) return;
+
+  const planc = document.getElementById('planc');
+  const PW = W || planc.clientWidth;
+  const PH = H || planc.clientHeight;
+
+  // wire-svg has pointer-events:none; planc handles background clicks directly
+
+  // Pending wire-start marker
+  if(S.wireStart){
+    const m = mkSvg('circle',{cx:S.wireStart.x,cy:S.wireStart.y,r:8,
+      fill:'none',stroke:'#f5a524','stroke-width':2,'stroke-dasharray':'3 2'});
+    svg.appendChild(m);
+    svg.appendChild(mkSvg('circle',{cx:S.wireStart.x,cy:S.wireStart.y,r:4,fill:'#f5a524'}));
+  }
+
+  S.wires.forEach(w => {
+    // Build point list: fromPt → control points → toPt
+    if(!w.cps) w.cps = [];  // array of {x,y} intermediate points
+
+    const pts = [w.fromPt, ...w.cps, w.toPt];
+    const color = w.color || '#5b8af7';
+    const isSelected = (S.selectedWireId === w.id);
+
+    // Build SVG path as polyline through all points (straight segments)
+    // Use quadratic bezier smoothing between segments when >2 pts
+    let dPath = '';
+    if(pts.length === 2){
+      // Simple straight dashed line
+      dPath = `M${pts[0].x},${pts[0].y} L${pts[1].x},${pts[1].y}`;
+    } else {
+      // Smooth through control points using cardinal spline
+      dPath = `M${pts[0].x},${pts[0].y}`;
+      for(let i = 0; i < pts.length - 1; i++){
+        const p0 = pts[Math.max(0,i-1)];
+        const p1 = pts[i];
+        const p2 = pts[i+1];
+        const p3 = pts[Math.min(pts.length-1,i+2)];
+        // Catmull-Rom control points
+        const cp1x = p1.x + (p2.x - p0.x)/6;
+        const cp1y = p1.y + (p2.y - p0.y)/6;
+        const cp2x = p2.x - (p3.x - p1.x)/6;
+        const cp2y = p2.y - (p3.y - p1.y)/6;
+        dPath += ` C${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`;
+      }
+    }
+
+    // ── Wide invisible hit area (easy to click) ───────────────────────────
+    const hitPath = mkSvg('path',{d:dPath,stroke:'transparent','stroke-width':'16',
+      fill:'none',style:'cursor:pointer;pointer-events:all'});
+    hitPath.addEventListener('click', e => {
+      e.stopPropagation();
+      if(S.wiringMode){ deleteWireById(w.id); toast('Fil supprimé'); return; }
+    });
+    hitPath.addEventListener('mousedown', e => {
+      if(e.button!==0) return;
+      e.stopPropagation(); e.preventDefault();
+      if(S.wiringMode) return;
+      // ★ Create control point at click position and start dragging immediately
+      const rect = planc.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      // Find best segment to insert into
+      let bestSeg = 0, bestDist = Infinity;
+      for(let i = 0; i < pts.length-1; i++){
+        const mx = (pts[i].x+pts[i+1].x)/2;
+        const my = (pts[i].y+pts[i+1].y)/2;
+        const dist = Math.hypot(cx-mx, cy-my);
+        if(dist < bestDist){ bestDist=dist; bestSeg=i; }
+      }
+      w.cps.splice(Math.max(0,bestSeg), 0, {x:cx, y:cy});
+      S.selectedWireId = w.id;
+      renderWires(PW,PH);
+      // Immediately start dragging the new point
+      startCpDrag(e, w, Math.max(0,bestSeg), planc);
+    });
+    svg.appendChild(hitPath);
+
+    // ── Visible wire path ─────────────────────────────────────────────────
+    const visPath = mkSvg('path',{d:dPath, stroke:color,
+      'stroke-width': isSelected ? '2.5' : '2',
+      'stroke-dasharray':'7 4', fill:'none',
+      opacity: isSelected ? '1' : '.85',
+      style:'pointer-events:none'});
+    svg.appendChild(visPath);
+
+    // Endpoint dots
+    [w.fromPt, w.toPt].forEach(pt => {
+      svg.appendChild(mkSvg('circle',{cx:pt.x,cy:pt.y,r:4,fill:color,opacity:'.9',style:'pointer-events:none'}));
+    });
+
+    // Length label at midpoint
+    const mid = pathMidpoint(pts);
+    const ceilH = parseFloat(document.getElementById('ceiling-h')?.value||2.5);
+    const scale = getScale();
+    const lenPx = polylineLength(pts);
+    const devH1 = getDeviceHeight(w.fromKey);
+    const devH2 = getDeviceHeight(w.toKey);
+    const lenM = (lenPx*scale + (ceilH-devH1) + (ceilH-devH2) + 0.3).toFixed(1);
+    const lbg = mkSvg('rect',{x:mid.x-18,y:mid.y-8,width:36,height:14,rx:3,
+      fill:'rgba(10,12,20,.88)',stroke:color,'stroke-width':0.5,style:'pointer-events:none'});
+    const ltxt = document.createElementNS('http://www.w3.org/2000/svg','text');
+    ltxt.setAttribute('x',mid.x); ltxt.setAttribute('y',mid.y+3);
+    ltxt.setAttribute('text-anchor','middle'); ltxt.setAttribute('font-size','8');
+    ltxt.setAttribute('fill',color); ltxt.setAttribute('font-family','Space Mono,monospace');
+    ltxt.setAttribute('pointer-events','none');
+    ltxt.textContent = lenM+'m';
+    svg.appendChild(lbg); svg.appendChild(ltxt);
+
+    // ── Control point handles (visible when wire is selected) ─────────────
+    if(isSelected){
+      w.cps.forEach((cp, cpIdx) => {
+        // Guide lines
+        const prev = cpIdx===0 ? w.fromPt : w.cps[cpIdx-1];
+        const next = cpIdx===w.cps.length-1 ? w.toPt : w.cps[cpIdx+1];
+        svg.appendChild(mkSvg('line',{x1:prev.x,y1:prev.y,x2:cp.x,y2:cp.y,
+          stroke:color,'stroke-width':0.8,'stroke-dasharray':'3 3',opacity:.4,style:'pointer-events:none'}));
+        svg.appendChild(mkSvg('line',{x1:cp.x,y1:cp.y,x2:next.x,y2:next.y,
+          stroke:color,'stroke-width':0.8,'stroke-dasharray':'3 3',opacity:.4,style:'pointer-events:none'}));
+
+        // Handle circle
+        const handle = mkSvg('circle',{cx:cp.x,cy:cp.y,r:7,
+          fill:'#14172400',stroke:color,'stroke-width':2,style:'cursor:move;pointer-events:all'});
+        // Inner cross
+        const cross = mkSvg('path',{
+          d:`M${cp.x-4},${cp.y} L${cp.x+4},${cp.y} M${cp.x},${cp.y-4} L${cp.x},${cp.y+4}`,
+          stroke:color,'stroke-width':1.5,fill:'none',style:'pointer-events:none'});
+
+        handle.addEventListener('mousedown', e => {
+          e.stopPropagation(); e.preventDefault();
+          startCpDrag(e, w, cpIdx, planc);
+        });
+        // Right-click to delete this control point
+        handle.addEventListener('contextmenu', e => {
+          e.preventDefault(); e.stopPropagation();
+          w.cps.splice(cpIdx,1);
+          renderWires(PW,PH);
+          toast('Point supprimé');
+        });
+        svg.appendChild(handle); svg.appendChild(cross);
+      });
+    }
+  });
+
+  updateLengths();
+}
+
+/* ── Drag a control point ─────────────────────────────────────────────────── */
+function startCpDrag(e, wire, cpIdx, planc){
+  const rect = planc.getBoundingClientRect();
+  function mv(ev){
+    const x = Math.max(0, Math.min(planc.clientWidth,  ev.clientX - rect.left));
+    const y = Math.max(0, Math.min(planc.clientHeight, ev.clientY - rect.top));
+    wire.cps[cpIdx] = {x, y};
+    renderWires(planc.clientWidth, planc.clientHeight);
+  }
+  function up(){ document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up); }
+  document.addEventListener('mousemove', mv);
+  document.addEventListener('mouseup', up);
+}
+
+/* ── Path helpers ─────────────────────────────────────────────────────────── */
+function pathMidpoint(pts){
+  // Return point at mid arc-length of the polyline
+  const total = polylineLength(pts);
+  let acc = 0, target = total/2;
+  for(let i=0;i<pts.length-1;i++){
+    const seg = Math.hypot(pts[i+1].x-pts[i].x, pts[i+1].y-pts[i].y);
+    if(acc+seg >= target){
+      const t = (target-acc)/seg;
+      return {x: pts[i].x + t*(pts[i+1].x-pts[i].x), y: pts[i].y + t*(pts[i+1].y-pts[i].y)};
+    }
+    acc += seg;
+  }
+  return pts[Math.floor(pts.length/2)];
+}
+
+function polylineLength(pts){
+  let len=0;
+  for(let i=0;i<pts.length-1;i++) len+=Math.hypot(pts[i+1].x-pts[i].x,pts[i+1].y-pts[i].y);
+  return len;
+}
+
+function getDeviceHeight(key){
+  if(!key||key==='TGBT') return 0;
+  const parts = key.split('_');
+  const rid   = parts.slice(0,-2).join('_');
+  const di    = parseInt(parts[parts.length-2]);
+  const room  = S.rooms.find(r=>r.id===rid);
+  return (room&&!isNaN(di)) ? (room.devices[di]?.wallH ?? 0.3) : 0.3;
+}
+
+function bezierPoint(x1,y1,cx,cy,x2,y2,t){
+  const mt=1-t;
+  return{x:mt*mt*x1+2*mt*t*cx+t*t*x2, y:mt*mt*y1+2*mt*t*cy+t*t*y2};
+}
+
+function bezierLengthPx(x1,y1,cx,cy,x2,y2,steps=20){
+  let len=0, prev=bezierPoint(x1,y1,cx,cy,x2,y2,0);
+  for(let i=1;i<=steps;i++){
+    const p=bezierPoint(x1,y1,cx,cy,x2,y2,i/steps);
+    len+=Math.hypot(p.x-prev.x,p.y-prev.y);
+    prev=p;
+  }
+  return len;
+}
+
+function mkSvg(tag,attrs){
+  const el=document.createElementNS('http://www.w3.org/2000/svg',tag);
+  Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,v));
+  return el;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   WIRING MODE
+═══════════════════════════════════════════════════════════ */
+function toggleWiringMode(){
+  S.wiringMode=!S.wiringMode;
+  document.getElementById('wbtn').classList.toggle('on',S.wiringMode);
+  document.getElementById('wire-hint').style.display=S.wiringMode?'block':'none';
+  if(!S.wiringMode){ S.wireStart=null; const p=document.getElementById('planc'); renderWires(p.clientWidth,p.clientHeight); }
+  else toast('Mode câblage — cliquez 2 contacts (cercles) ou 2 points du plan');
+}
+
+function handleContact(cpEl){
+  if(!S.wiringMode) return;
+  const x=parseFloat(cpEl.dataset.x), y=parseFloat(cpEl.dataset.y);
+  const circuit=cpEl.dataset.circuit||'PC';
+  const color=cpEl.dataset.color||'#5b8af7';
+  const key=cpEl.dataset.key;
+  const planc=document.getElementById('planc');
+
+  cpEl.classList.add('active-start');
+
+  if(!S.wireStart){
+    S.wireStart={x,y,key,circuit,color};
+    renderWires(planc.clientWidth,planc.clientHeight);
+    toast('Point A — cliquez le point B');
+  } else {
+    const wid='w_'+(Date.now());
+    S.wires.push({
+      id:wid, fromKey:S.wireStart.key, toKey:key,
+      fromPt:{x:S.wireStart.x,y:S.wireStart.y},
+      toPt:{x,y}, cps:[], circuit, color, label:circuit
+    });
+    document.querySelectorAll('.cpt.active-start').forEach(e=>e.classList.remove('active-start'));
+    S.wireStart=null;
+    renderWires(planc.clientWidth,planc.clientHeight);
+    toast('Fil tracé ✓');
+  }
+}
+
+// Plan click (blank area) in wiring mode
+function planClick(e){
+  // Clear wire selection when clicking blank area
+  if(S.selectedWireId && !S.wiringMode){
+    S.selectedWireId=null;
+    const p=document.getElementById('planc');
+    renderWires(p.clientWidth,p.clientHeight);
+  }
+  if(S.addingVertex&&S.selectedRoomId){
+    const planc=document.getElementById('planc');
+    const rect=planc.getBoundingClientRect();
+    const x_pct=(e.clientX-rect.left)/planc.clientWidth*100;
+    const y_pct=(e.clientY-rect.top)/planc.clientHeight*100;
+    addVertexAtClick(x_pct,y_pct);
+    return;
+  }
+  // Calibration mode intercepts all clicks
+  if(S.calibMode){
+    const planc=document.getElementById('planc');
+    const rect=planc.getBoundingClientRect();
+    handleCalibClick(e.clientX-rect.left, e.clientY-rect.top);
+    return;
+  }
+  if(!S.wiringMode) return;
+  if(e.target.closest('.dico,.cpt,.room-vertex')) return;
+  const planc=document.getElementById('planc');
+  const rect=planc.getBoundingClientRect();
+  const x=e.clientX-rect.left, y=e.clientY-rect.top;
+  if(!S.wireStart){
+    S.wireStart={x,y,key:null,circuit:'PC',color:'#5b8af7'};
+    renderWires(planc.clientWidth,planc.clientHeight);
+    toast('Point A — cliquez le point B');
+  } else {
+    const wid='w_'+(Date.now());
+    S.wires.push({id:wid,fromKey:S.wireStart.key,toKey:null,fromPt:{x:S.wireStart.x,y:S.wireStart.y},toPt:{x,y},cps:[],circuit:'PC',color:'#5b8af7',label:'PC'});
+    S.wireStart=null;
+    renderWires(planc.clientWidth,planc.clientHeight);
+    toast('Fil tracé ✓');
+  }
+}
+
+function deleteWireById(wid){ S.wires=S.wires.filter(w=>w.id!==wid); const p=document.getElementById('planc'); renderWires(p.clientWidth,p.clientHeight); }
+
+/* ═══════════════════════════════════════════════════════════
+   CALIBRATION MODE — draw a reference line, enter real length
+═══════════════════════════════════════════════════════════ */
+function toggleCalibMode(){
+  S.calibMode=!S.calibMode;
+  S.calibPt1=null;
+  document.getElementById('calib-btn').classList.toggle('on',S.calibMode);
+  document.getElementById('calib-hint').style.display=S.calibMode?'inline':'none';
+  if(S.calibMode){
+    if(S.wiringMode) toggleWiringMode();
+    toast('📐 Cliquez un premier point de référence sur le plan');
+  } else {
+    renderCalibLine();
+    toast('Calibration désactivée');
+  }
+}
+
+function renderCalibLine(){
+  // Draw calibration line on wire-svg overlay
+  const svg=document.getElementById('wire-svg');
+  svg.querySelectorAll('.calib-el').forEach(e=>e.remove());
+  if(!S.calibPt1) return;
+  const c=mkSvg('circle',{cx:S.calibPt1.x,cy:S.calibPt1.y,r:6,fill:'#9B59B6',opacity:.9,class:'calib-el'});
+  svg.appendChild(c);
+}
+
+function handleCalibClick(x,y){
+  if(!S.calibPt1){
+    S.calibPt1={x,y};
+    renderCalibLine();
+    document.getElementById('calib-hint').textContent='📐 Cliquez le deuxième point';
+    toast('Point 1 enregistré — cliquez le point 2');
+  } else {
+    // Measure pixel distance
+    const px=Math.hypot(x-S.calibPt1.x,y-S.calibPt1.y);
+    // Draw the line
+    const svg=document.getElementById('wire-svg');
+    svg.querySelectorAll('.calib-el').forEach(e=>e.remove());
+    const line=mkSvg('line',{x1:S.calibPt1.x,y1:S.calibPt1.y,x2:x,y2:y,stroke:'#9B59B6','stroke-width':2,'stroke-dasharray':'4 2',class:'calib-el'});
+    svg.appendChild(line);
+    [S.calibPt1,{x,y}].forEach(p=>{
+      svg.appendChild(mkSvg('circle',{cx:p.x,cy:p.y,r:5,fill:'#9B59B6',class:'calib-el'}));
+    });
+    // Prompt for real distance
+    const dist=parseFloat(prompt(`Distance mesurée : ${px.toFixed(0)} px\nEntrez la distance réelle en mètres (ex: 3.5) :`));
+    if(dist && dist>0){
+      S.calibPixels=px;
+      S.calibMeters=dist;
+      // Also update plan-width-m for display consistency
+      const planc=document.getElementById('planc');
+      const planWidthM=+(dist/px*planc.clientWidth).toFixed(1);
+      const pwInput=document.getElementById('plan-width-m');
+      if(pwInput) pwInput.value=planWidthM;
+      updateLengths();
+      toast(`✓ Échelle calibrée : 1 px = ${(dist/px*100).toFixed(2)} cm — Plan ≈ ${planWidthM} m de large`);
+    } else {
+      toast('Calibration annulée');
+    }
+    S.calibMode=false;
+    S.calibPt1=null;
+    document.getElementById('calib-btn').classList.remove('on');
+    document.getElementById('calib-hint').style.display='none';
+    document.getElementById('calib-hint').textContent='📐 Cliquez 2 points de référence';
+  }
+}
+function deleteLastWire(){ if(!S.wires.length){toast('Aucun fil');return;} S.wires.pop(); const p=document.getElementById('planc'); renderWires(p.clientWidth,p.clientHeight); toast('Dernier fil effacé'); }
+function clearWires(){ S.wires=[]; S.wireStart=null; const p=document.getElementById('planc'); renderWires(p.clientWidth,p.clientHeight); toast('Fils effacés'); }
+
+/* ═══════════════════════════════════════════════════════════
+   VIEW SWITCH — disable wiring on leave
+═══════════════════════════════════════════════════════════ */
+function setView(v,el){
+  // Disable wiring mode when leaving plan view
+  if(S.view==='plan' && v!=='plan' && S.wiringMode){
+    S.wiringMode=false;
+    S.wireStart=null;
+    document.getElementById('wbtn').classList.remove('on');
+    document.getElementById('wire-hint').style.display='none';
+  }
+  S.view=v;
+  document.querySelectorAll('.vtab').forEach(t=>t.classList.remove('on'));
+  el.classList.add('on');
+  document.getElementById('vwiring').classList.toggle('show',v==='wiring');
+  document.getElementById('vschema').classList.toggle('show',v==='schema');
+  document.getElementById('vlengths').classList.toggle('show',v==='lengths');
+  document.getElementById('vpowers').classList.toggle('show',v==='powers');
+  document.getElementById('vdevices').classList.toggle('show',v==='devices');
+  if(v==='wiring')  buildWiringView();
+  else if(v==='schema')  buildSchema();
+  else if(v==='lengths') buildLengthsView();
+  else if(v==='powers')  buildPowersView();
+  else if(v==='devices') buildDevicesView();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ROOM INTERACTIONS
+═══════════════════════════════════════════════════════════ */
+function selectRoom(id){
+  S.selectedRoomId=(S.selectedRoomId===id)?null:id;
+  document.querySelectorAll('.rcard').forEach(c=>c.classList.remove('active'));
+  if(S.selectedRoomId){
+    document.getElementById('rc-'+id)?.classList.add('active');
+    document.getElementById('rc-'+id)?.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+  renderPlan();
+}
+
+function toggleCard(id){ document.getElementById('rc-'+id)?.classList.toggle('open'); }
+
+function deleteRoom(id){
+  S.rooms=S.rooms.filter(r=>r.id!==id);
+  S.wires=S.wires.filter(w=>!w.fromKey?.startsWith(id)&&!w.toKey?.startsWith(id));
+  if(S.selectedRoomId===id) S.selectedRoomId=null;
+  renderAll();
+  toast('Pièce supprimée');
+}
+
+function chQty(rid,di,delta){
+  const room=S.rooms.find(r=>r.id===rid); if(!room) return;
+  room.devices[di].qty=Math.max(0,room.devices[di].qty+delta);
+  room.devices[di]._pos=[];
+  renderAll();
+}
+function removeProt(rid,pi){ const room=S.rooms.find(r=>r.id===rid); if(!room) return; room.protections.splice(pi,1); renderAll(); }
+
+function startRenameRoom(rid){
+  const room=S.rooms.find(r=>r.id===rid); if(!room) return;
+  const el=document.getElementById('rname-'+rid); if(!el) return;
+  const inp=document.createElement('input');
+  inp.className='rname-input'; inp.value=room.name;
+  inp.onclick=e=>e.stopPropagation();
+  inp.onblur=inp.onkeydown=function(e){
+    if(e.type==='keydown'&&e.key!=='Enter'&&e.key!=='Escape') return;
+    if(e.key==='Escape'){renderSidebar();return;}
+    const val=inp.value.trim();
+    if(val) room.name=val;
+    renderSidebar(); renderPlan();
+  };
+  el.replaceWith(inp); inp.focus(); inp.select();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ADD ROOM MODAL
+═══════════════════════════════════════════════════════════ */
+function openAddRoomModal(){
+  modalRoomTarget=null;
+  document.getElementById('modal-room-title').textContent='Ajouter une pièce';
+  fillRoomModal(null);
+  document.getElementById('modal-room').classList.add('open');
+}
+
+function openChangeRoom(rid){
+  modalRoomTarget=rid;
+  document.getElementById('modal-room-title').textContent='Changer le type de pièce';
+  const room=S.rooms.find(r=>r.id===rid);
+  fillRoomModal(room?.type);
+  document.getElementById('modal-room').classList.add('open');
+}
+
+function fillRoomModal(currentType){
+  document.getElementById('mroomlist').innerHTML=Object.entries(NFC).map(([type,rule])=>`
+    <div class="mopt ${currentType===type?'current':''}" onclick="applyRoomModal('${type}')">
+      <span class="em" style="font-size:20px">${rule.icon}</span>
+      <div><div class="mn">${rule.label}</div><div class="md">${rule.devs.length} appareils NFC 15-100 ${currentType===type?'· actuel':''}</div></div>
+    </div>`).join('');
+}
+
+function applyRoomModal(type){
+  document.getElementById('modal-room').classList.remove('open');
+  if(modalRoomTarget){
+    // Change existing room type
+    const room=S.rooms.find(r=>r.id===modalRoomTarget);
+    if(room){
+      const rule=NFC[type];
+      room.type=type; room.name=rule.label;
+      room.devices=[...rule.devs.map(d=>({...d}))];
+      room.protections=[...rule.prots.map(p=>({...p}))];
+      room.devices.forEach(d=>d._pos=[]);
+      toast(`Pièce changée → ${rule.label}`);
+    }
+  } else {
+    // Add new room
+    const planc=document.getElementById('planc');
+    const W=planc.clientWidth, H=planc.clientHeight;
+    // Place in center with some offset based on count
+    const off=S.rooms.length*4;
+    const x_pct=Math.min(70,10+off), y_pct=Math.min(60,10+off);
+    const room=nfcRoom(type,{x_pct,y_pct,w_pct:28,h_pct:32});
+    S.rooms.push(room);
+    S.selectedRoomId=room.id;
+    toast(`${NFC[type].icon} ${NFC[type].label} ajouté`);
+  }
+  renderAll();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DEVICE & PROTECTION MODALS
+═══════════════════════════════════════════════════════════ */
+function openDevModal(rid){
+  modalDevRoom=rid;
+  const room=S.rooms.find(r=>r.id===rid);
+  const ex=new Set(room.devices.map(d=>d.id));
+  document.getElementById('mdevlist').innerHTML=ALL_DEV.map(d=>`
+    <div class="mopt" onclick="addDev('${d.id}')">
+      <span class="em">${d.icon}</span>
+      <div><div class="mn">${d.name}</div><div class="md">${d.power}W · ${d.circuit} ${ex.has(d.id)?'<span style="color:var(--ok)">✓</span>':''}</div></div>
+    </div>`).join('');
+  document.getElementById('modal-dev').classList.add('open');
+}
+function addDev(did){
+  const room=S.rooms.find(r=>r.id===modalDevRoom); if(!room) return;
+  const ex=room.devices.find(d=>d.id===did);
+  if(ex){ ex.qty++; } else { const t=ALL_DEV.find(d=>d.id===did); if(t) room.devices.push({...t,qty:1,_pos:[]}); }
+  document.getElementById('modal-dev').classList.remove('open');
+  renderAll(); toast('Appareil ajouté');
+}
+function openProtModal(rid){
+  modalProtRoom=rid;
+  document.getElementById('mprotlist').innerHTML=ALL_PROT.map(p=>`
+    <div class="mopt" onclick="addProt('${p.id}')">
+      <span class="em">${p.icon}</span>
+      <div><div class="mn" style="color:${p.color}">${p.name}</div><div class="md">${p.spec} · ${p.type.toUpperCase()}</div></div>
+    </div>`).join('');
+  document.getElementById('modal-prot').classList.add('open');
+}
+function addProt(pid){
+  const room=S.rooms.find(r=>r.id===modalProtRoom); if(!room) return;
+  if(!room.protections) room.protections=[];
+  const t=ALL_PROT.find(p=>p.id===pid); if(t) room.protections.push({...t});
+  document.getElementById('modal-prot').classList.remove('open');
+  renderAll(); toast('Protection ajoutée');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   CONTEXT MENU
+═══════════════════════════════════════════════════════════ */
+function showCtxMenu(e,roomId){
+  ctxRoomId=roomId;
+  const menu=document.getElementById('ctx-menu');
+  menu.style.left=e.clientX+'px'; menu.style.top=e.clientY+'px';
+  menu.classList.add('show');
+}
+function hideCtxMenu(){ document.getElementById('ctx-menu').classList.remove('show'); ctxRoomId=null; }
+function ctxChangeRoom(){ hideCtxMenu(); if(ctxRoomId) openChangeRoom(ctxRoomId); }
+function ctxAddVertex(){ hideCtxMenu(); S.selectedRoomId=ctxRoomId; S.addingVertex=true; document.getElementById('poly-btn').classList.add('on'); renderPlan(); toast('Cliquez sur un bord pour ajouter un sommet'); }
+function ctxAddDevice(){ hideCtxMenu(); if(ctxRoomId) openDevModal(ctxRoomId); }
+function ctxDeleteRoom(){ const id=ctxRoomId; hideCtxMenu(); if(id) deleteRoom(id); }
+document.addEventListener('click',()=>hideCtxMenu());
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ hideCtxMenu(); if(S.wiringMode) toggleWiringMode(); if(S.addingVertex){ S.addingVertex=false; document.getElementById('poly-btn').classList.remove('on'); } } });
+
+/* ═══════════════════════════════════════════════════════════
+   BACKGROUND IMAGE
+═══════════════════════════════════════════════════════════ */
+function setBgOp(v){
+  const bg=document.getElementById('plan-bg');
+  bg.style.opacity=v/100;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LAYER TOGGLES
+═══════════════════════════════════════════════════════════ */
+function toggleLayer(l,b){
+  if(l==='zones'){ S.showZones=!S.showZones; b.classList.toggle('on',S.showZones); }
+  else if(l==='devices'){ S.showDevices=!S.showDevices; b.classList.toggle('on',S.showDevices); }
+  else if(l==='wires'){ S.showWires=!S.showWires; b.classList.toggle('on',S.showWires); }
+  renderPlan();
+}
+function setOp(v){ S.zoneOp=v; document.querySelectorAll('[data-room]').forEach(g=>{ const poly=g.querySelector('polygon'); if(poly) poly.style.fillOpacity=v/100; }); }
+
+/* ═══════════════════════════════════════════════════════════
+   WIRING / SCHEMA VIEWS
+═══════════════════════════════════════════════════════════ */
+function sT(txt,x,y,sz,fill,anchor,font){
+  const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+  t.setAttribute('x',x);t.setAttribute('y',y);t.setAttribute('font-size',sz||10);t.setAttribute('fill',fill||'#e8eaf0');t.setAttribute('text-anchor',anchor||'start');
+  if(font)t.setAttribute('font-family',font+',monospace');t.textContent=txt;return t;
+}
+function sSvg(tag,attrs){ const el=document.createElementNS('http://www.w3.org/2000/svg',tag); Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,v)); return el; }
+function sBox(svg,x,y,w,h,c,lbl,sub){ svg.appendChild(sSvg('rect',{x,y,width:w,height:h,rx:4,fill:c+'18',stroke:c,'stroke-width':1.2})); svg.appendChild(sT(lbl,x+w/2,y+(sub?h/2-1:h/2+4),8,c,'middle')); if(sub)svg.appendChild(sT(sub,x+w/2,y+h/2+9,7,c+'99','middle')); }
+function sCB(svg,x,y,w,h,c,lbl){ svg.appendChild(sSvg('rect',{x,y,width:w,height:h,rx:3,fill:c+'22',stroke:c,'stroke-width':1})); svg.appendChild(sSvg('path',{d:`M${x+3},${y+h-3}L${x+w-3},${y+3}`,stroke:c,'stroke-width':1,fill:'none'})); if(lbl)svg.appendChild(sT(lbl,x+w/2,y+h/2+4,7,c,'middle')); }
+function sDevB(svg,x,y,sz,icon,c){ svg.appendChild(sSvg('rect',{x,y,width:sz,height:sz,rx:2,fill:c+'22',stroke:c,'stroke-width':0.7})); const t=document.createElementNS('http://www.w3.org/2000/svg','text'); t.setAttribute('x',x+sz/2);t.setAttribute('y',y+sz-1);t.setAttribute('text-anchor','middle');t.setAttribute('font-size','8');t.textContent=icon;svg.appendChild(t); }
+
+function buildWiringView(){
+  const cont=document.getElementById('vwiring-inner'); cont.innerHTML='';
+  if(!S.rooms.length){cont.innerHTML='<p style="color:var(--txt3);padding:28px">Aucune pièce.</p>';return;}
+  const totalW=Math.max(S.rooms.length*145+40,760);
+  const svgEl=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svgEl.setAttribute('viewBox',`0 0 ${totalW} 560`); svgEl.style.width='100%';
+  svgEl.appendChild(sSvg('rect',{width:totalW,height:560,fill:'#080b12'}));
+  svgEl.appendChild(sT('Vue câblage — circuits par pièce',totalW/2,18,11,'#8890a8','middle','Space Mono'));
+  S.rooms.forEach((room,ri)=>{
+    const rx=20+ri*145,ry=36;
+    svgEl.appendChild(sSvg('rect',{x:rx,y:ry,width:124,height:28,rx:4,fill:room.color+'22',stroke:room.color,'stroke-width':1}));
+    svgEl.appendChild(sT(room.name.slice(0,16),rx+62,ry+17,9,room.color,'middle'));
+    let dy=ry+42;
+    const byCirc={};
+    room.devices.filter(d=>d.qty>0).forEach(d=>{ if(!byCirc[d.circuit]) byCirc[d.circuit]=[]; byCirc[d.circuit].push(d); });
+    Object.entries(byCirc).forEach(([circ,devs])=>{
+      const col=CMAP[circ]||'#888';
+      svgEl.appendChild(sSvg('line',{x1:rx+62,y1:ry+28,x2:rx+62,y2:dy,stroke:col,'stroke-width':1.4,'stroke-dasharray':'5 2'}));
+      svgEl.appendChild(sT(circ,rx+62,dy+9,7,col,'middle','Space Mono'));
+      dy+=16; let ix=rx+4;
+      devs.forEach(d=>{ for(let i=0;i<Math.min(d.qty,5);i++){ svgEl.appendChild(sSvg('line',{x1:rx+62,y1:dy-2,x2:ix+8,y2:dy+4,stroke:col,'stroke-width':0.8,'stroke-dasharray':'2 2',opacity:.6})); sDevB(svgEl,ix,dy,16,d.icon,col); ix+=20; } if(d.qty>5)svgEl.appendChild(sT(`×${d.qty}`,ix,dy+11,8,col,'start')); });
+      dy+=24;
+    });
+    if((room.protections||[]).length){ dy+=4; (room.protections).forEach((p,pi)=>{ const px=rx+4+pi*26; svgEl.appendChild(sSvg('rect',{x:px,y:dy,width:20,height:20,rx:3,fill:(p.color||'#f87171')+'22',stroke:p.color||'#f87171','stroke-width':1})); const pt=document.createElementNS('http://www.w3.org/2000/svg','text'); pt.setAttribute('x',px+10);pt.setAttribute('y',dy+14);pt.setAttribute('text-anchor','middle');pt.setAttribute('font-size','9');pt.textContent=p.icon;svgEl.appendChild(pt); }); }
+  });
+  let lx=20,ly=530;
+  Object.entries(CMAP).forEach(([circ,col])=>{ svgEl.appendChild(sSvg('rect',{x:lx,y:ly,width:8,height:5,fill:col,rx:1})); svgEl.appendChild(sT(circ,lx+11,ly+6,7,col,'start')); lx+=circ.length*4.5+22; if(lx>totalW-60){lx=20;ly+=13;} });
+  cont.appendChild(svgEl);
+}
+
+function buildSchema(){
+  const cont=document.getElementById('vschema-inner'); cont.innerHTML='';
+  if(!S.rooms.length){cont.innerHTML='<p style="color:var(--txt3);padding:28px">Aucune pièce.</p>';return;}
+  const totalPow=calcPower(); const mainAmp=Math.max(25,Math.ceil(totalPow*1000/230/0.8/10)*10);
+  const svgH=200+S.rooms.length*90;
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox',`0 0 820 ${svgH}`); svg.style.cssText='width:100%;max-width:820px;display:block;margin:0 auto';
+  svg.appendChild(sSvg('rect',{width:820,height:svgH,fill:'#080b12'}));
+  svg.appendChild(sT('Schéma unifilaire — TGBT NFC 15-100',410,18,11,'#8890a8','middle','Space Mono'));
+  sBox(svg,30,30,100,38,'#f5a524','Compteur EDF','230V 50Hz');
+  sBox(svg,170,30,90,38,'#f87171','Parafoudre','T1+T2');
+  svg.appendChild(sSvg('line',{x1:130,y1:49,x2:170,y2:49,stroke:'#f87171','stroke-width':1.2,'stroke-dasharray':'3 2'}));
+  svg.appendChild(sSvg('line',{x1:80,y1:68,x2:80,y2:95,stroke:'#f5a524','stroke-width':1.5,'stroke-dasharray':'5 2'}));
+  sCB(svg,50,95,60,24,'#f5a524',`${mainAmp}A`);
+  svg.appendChild(sSvg('line',{x1:80,y1:119,x2:80,y2:145,stroke:'#f5a524','stroke-width':1.5,'stroke-dasharray':'5 2'}));
+  sBox(svg,30,145,100,20,'#8890a8','Jeu de barres','');
+  const ddrs=[{l:'DDR A',cs:['éclairage','commande'],c:'#f5a524'},{l:'DDR B',cs:['PC','courants faibles','PC Z2'],c:'#5b8af7'},{l:'DDR C',cs:['dédié','dédié cuisson','dédié four','dédié IRVE','VMC'],c:'#f87171'}];
+  ddrs.forEach((g,gi)=>{ const gx=20+gi*135; svg.appendChild(sSvg('line',{x1:80,y1:165,x2:gx+62,y2:165,stroke:g.c,'stroke-width':1,'stroke-dasharray':'3 2',opacity:.6})); svg.appendChild(sSvg('line',{x1:gx+62,y1:165,x2:gx+62,y2:180,stroke:g.c,'stroke-width':1.2,'stroke-dasharray':'5 2'})); sBox(svg,gx+12,180,100,26,g.c,`${g.l} 30mA`,'40A'); svg.appendChild(sSvg('line',{x1:gx+62,y1:206,x2:gx+62,y2:216,stroke:g.c,'stroke-width':1.2,'stroke-dasharray':'5 2'})); svg.appendChild(sSvg('line',{x1:gx+12,y1:216,x2:gx+112,y2:216,stroke:g.c,'stroke-width':1})); });
+  let cy=240;
+  S.rooms.forEach((room)=>{
+    const circuits=[...new Set(room.devices.filter(d=>d.qty>0).map(d=>d.circuit))]; if(!circuits.length) return;
+    let cx=20;
+    svg.appendChild(sSvg('rect',{x:cx,y:cy,width:14,height:14,rx:3,fill:room.color+'33',stroke:room.color,'stroke-width':.8}));
+    svg.appendChild(sT(room.name.slice(0,22),cx+17,cy+10,9,room.color,'start'));
+    cy+=16;
+    circuits.forEach((circ)=>{
+      const cbAmp=circ.includes('cuisson')||circ.includes('four')||circ.includes('IRVE')?32:circ==='dédié'?20:circ==='PC'?16:circ==='éclairage'?10:16;
+      const col=CMAP[circ]||'#888';
+      const ddrGi=ddrs.findIndex(g=>g.cs.includes(circ));
+      const ddrX=20+(ddrGi>=0?ddrGi:0)*135+62;
+      svg.appendChild(sSvg('line',{x1:ddrX,y1:216,x2:cx+36,y2:cy,stroke:col,'stroke-width':.8,'stroke-dasharray':'3 2',opacity:.45}));
+      sCB(svg,cx,cy,72,22,col,`${cbAmp}A`); svg.appendChild(sT(circ,cx+36,cy+30,7,col,'middle'));
+      const devs=room.devices.filter(d=>d.qty>0&&d.circuit===circ); let dx=cx+4;
+      devs.forEach(d=>{ for(let i=0;i<Math.min(d.qty,4);i++){ svg.appendChild(sSvg('line',{x1:cx+36,y1:cy+22,x2:dx+7,y2:cy+38,stroke:col,'stroke-width':.7,'stroke-dasharray':'2 2',opacity:.6})); sDevB(svg,dx,cy+38,13,d.icon,col); dx+=17; } if(d.qty>4)svg.appendChild(sT(`×${d.qty}`,dx,cy+46,7,col,'start')); dx+=4; });
+      (room.protections||[]).slice(0,1).forEach((p)=>{ sCB(svg,cx+76,cy,20,22,p.color||'#f87171',''); svg.appendChild(sT(p.amp>0?p.amp+'A':'SPD',cx+86,cy+32,7,p.color||'#f87171','middle')); });
+      cx+=105;
+    });
+    svg.appendChild(sSvg('line',{x1:10,y1:cy+62,x2:810,y2:cy+62,stroke:'rgba(255,255,255,0.04)','stroke-width':1}));
+    cy+=70;
+  });
+  cont.appendChild(svg);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   BILAN
+═══════════════════════════════════════════════════════════ */
+function calcPower(){ return S.rooms.reduce((s,r)=>s+r.devices.reduce((ss,d)=>ss+(d.power*d.qty*(d.circuit==='PC'?0.1:1)),0),0)/1000; }
+function updateBilan(){
+  let devs=0; const circs=new Set();
+  S.rooms.forEach(r=>{r.devices.forEach(d=>{devs+=d.qty;if(d.qty>0)circs.add(d.circuit);});});
+  document.getElementById('bpow').textContent=calcPower().toFixed(1);
+  document.getElementById('bdev').textContent=devs;
+  document.getElementById('bcir').textContent=circs.size;
+  document.getElementById('bcon').textContent=S.rooms.length?'94%':'—';
+}
+
+/* ═══════════════════════════════════════════════════════════
+   STATUS / TOAST
+═══════════════════════════════════════════════════════════ */
+function showStatus(msg,type){ const el=document.getElementById('astatus'); if(!el) return; el.textContent=msg; el.style.display='block'; el.style.color={'ok':'var(--ok)','warn':'var(--warn)','err':'var(--err)','info':'var(--txt3)'}[type]||'var(--txt3)'; clearTimeout(el._t); if(type==='ok') el._t=setTimeout(()=>el.style.display='none',4000); }
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2400); }
+
+
+/* ═══════════════════════════════════════════════════════════
+   TGBT — draggable electrical panel box
+═══════════════════════════════════════════════════════════ */
+const TGBT={x:30,y:30,visible:false};
+
+function toggleTGBT(){
+  TGBT.visible=!TGBT.visible;
+  const el=document.getElementById('tgbt-el');
+  el.style.display=TGBT.visible?'block':'none';
+  if(curApt()) curApt().tgbtPos={x:TGBT.x,y:TGBT.y,visible:TGBT.visible};
+  document.getElementById('tgbt-btn').classList.toggle('on',TGBT.visible);
+  toast(TGBT.visible?'Tableau TGBT affiché — glissez pour repositionner':'TGBT masqué');
+}
+
+function initTGBT(){
+  const el=document.getElementById('tgbt-el');
+  if(!el) return;
+  el.style.left=TGBT.x+'px'; el.style.top=TGBT.y+'px';
+  // Drag
+  el.addEventListener('mousedown',(e)=>{
+    if(e.target===document.getElementById('tgbt-cp')) return;
+    e.preventDefault();
+    const planc=document.getElementById('planc');
+    const rect=planc.getBoundingClientRect();
+    const ox=e.clientX-rect.left-parseInt(el.style.left);
+    const oy=e.clientY-rect.top-parseInt(el.style.top);
+    function mv(ev){
+      const x=Math.max(0,Math.min(planc.clientWidth-80,ev.clientX-rect.left-ox));
+      const y=Math.max(0,Math.min(planc.clientHeight-60,ev.clientY-rect.top-oy));
+      el.style.left=x+'px'; el.style.top=y+'px';
+      TGBT.x=x; TGBT.y=y;
+      if(curApt()) curApt().tgbtPos={x,y,visible:true};
+      updateTGBTWires();
+    }
+    function up(){ document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up); }
+    document.addEventListener('mousemove',mv); document.addEventListener('mouseup',up);
+  });
+
+  // TGBT contact point click → start wiring from TGBT
+  document.getElementById('tgbt-cp').addEventListener('click',(e)=>{
+    e.stopPropagation();
+    if(!S.wiringMode) return;
+    const planc=document.getElementById('planc');
+    const rect=planc.getBoundingClientRect();
+    const bx=TGBT.x+parseInt(el.offsetWidth)/2;
+    const by=TGBT.y+parseInt(el.offsetHeight)+4;
+    if(!S.wireStart){
+      S.wireStart={x:bx,y:by,key:'TGBT',circuit:'TGBT',color:'#f5a524'};
+      renderWires(planc.clientWidth,planc.clientHeight);
+      toast('TGBT sélectionné — cliquez un appareil');
+    } else {
+      const wid='w_tgbt_'+(Date.now());
+      S.wires.push({id:wid,fromKey:'TGBT',toKey:null,fromPt:{x:bx,y:by},toPt:{x:bx,y:by+50},circuit:'TGBT',color:'#f5a524',label:'TGBT',isTGBT:true});
+      S.wireStart=null;
+      renderWires(planc.clientWidth,planc.clientHeight);
+    }
+  });
+}
+
+function updateTGBTWires(){
+  const el=document.getElementById('tgbt-el');
+  const bx=TGBT.x+(el.offsetWidth||64)/2;
+  const by=TGBT.y+(el.offsetHeight||52)+4;
+  S.wires.forEach(w=>{
+    if(w.fromKey==='TGBT') w.fromPt={x:bx,y:by};
+    if(w.toKey==='TGBT')   w.toPt={x:bx,y:by};
+  });
+  const planc=document.getElementById('planc');
+  renderWires(planc.clientWidth,planc.clientHeight);
+}
+
+/* ── Auto-wire all devices to TGBT ─────────────────────────────────────────  */
+function autoWireToTGBT(){
+  if(!TGBT.visible){ toggleTGBT(); }
+  const planc=document.getElementById('planc');
+  const W=planc.clientWidth, H=planc.clientHeight;
+  const el=document.getElementById('tgbt-el');
+  const bx=TGBT.x+(el.offsetWidth||64)/2;
+  const by=TGBT.y+(el.offsetHeight||52)+4;
+
+  // Group devices by circuit, draw one wire per circuit per room
+  const seen=new Set();
+  S.rooms.forEach(room=>{
+    room.devices.forEach((d,di)=>{
+      if(d.qty===0) return;
+      const ckey=`${room.id}_${d.circuit}`;
+      if(seen.has(ckey)) return;
+      seen.add(ckey);
+      // Use first instance position
+      const pos=d._pos&&d._pos[0];
+      if(!pos) return;
+      const tx=pos.x+16, ty=pos.y+16;
+      const col=CMAP[d.circuit]||room.color;
+      const wid='w_auto_'+room.id+'_'+di;
+      // Don't duplicate
+      if(S.wires.find(w=>w.id===wid)) return;
+      S.wires.push({
+        id:wid, fromKey:'TGBT', toKey:`${room.id}_${di}_0`,
+        fromPt:{x:bx,y:by}, toPt:{x:tx,y:ty},
+        circuit:d.circuit, color:col, label:d.circuit,
+        isTGBT:true
+      });
+    });
+  });
+  renderWires(W,H);
+  toast('Liaisons TGBT tracées ✓');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LENGTH ESTIMATION
+   Scale: we estimate 1% of plan width ≈ planScale metres
+   Default: plan is ~10m wide. User can change via ceiling-h.
+═══════════════════════════════════════════════════════════ */
+function getScale(){
+  const planc=document.getElementById('planc');
+  const W=planc.clientWidth||800;
+  // Use user-entered real plan width (default 12m)
+  const planWidthM=parseFloat(document.getElementById('plan-width-m')?.value||12);
+  if(S.calibPixels>0){
+    // User has calibrated: use measured pixels for known distance
+    return S.calibMeters/S.calibPixels;
+  }
+  return planWidthM/W; // m per pixel
+}
+
+function wiredLengthM(w){
+  const scale  = getScale();
+  const ceilH  = parseFloat(document.getElementById('ceiling-h')?.value||2.5);
+  const pts    = [w.fromPt,...(w.cps||[]),w.toPt];
+  const lenPx  = polylineLength(pts);
+  const hRun   = lenPx * scale;
+  const h1     = getDeviceHeight(w.fromKey);
+  const h2     = getDeviceHeight(w.toKey);
+  const vRoute = (ceilH-h1) + (ceilH-h2) + 0.3;
+  return +(hRun + vRoute).toFixed(1);
+}
+
+function updateLengths(){
+  if(!S.wires.length){
+    document.getElementById('len-rows').innerHTML='<p style="font-size:10px;color:var(--txt3)">Tracez des fils pour voir les longueurs estimées</p>';
+    return;
+  }
+  // Group by circuit
+  const groups={};
+  S.wires.forEach(w=>{
+    if(!groups[w.circuit]) groups[w.circuit]={color:w.color,total:0,count:0};
+    groups[w.circuit].total+=wiredLengthM(w);
+    groups[w.circuit].count++;
+  });
+  let html='';
+  Object.entries(groups).forEach(([circ,g])=>{
+    html+=`<div class="len-row">
+      <div class="len-color" style="background:${g.color}"></div>
+      <span class="len-label">${circ} (${g.count} fil${g.count>1?'s':''})</span>
+      <span class="len-val">~${g.total.toFixed(1)} m</span>
+    </div>`;
+  });
+  // Grand total
+  const total=Object.values(groups).reduce((s,g)=>s+g.total,0);
+  html+=`<div class="len-row" style="border-color:var(--acc)">
+    <div class="len-color" style="background:var(--acc)"></div>
+    <span class="len-label" style="color:var(--txt);font-weight:500">Total câblage</span>
+    <span class="len-val" style="color:var(--acc)">~${total.toFixed(1)} m</span>
+  </div>`;
+  document.getElementById('len-rows').innerHTML=html;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LENGTHS DETAIL VIEW
+═══════════════════════════════════════════════════════════ */
+function buildLengthsView(){
+  const cont=document.getElementById('vlengths-inner');
+  cont.innerHTML='';
+  if(!S.wires.length){
+    cont.innerHTML='<p style="color:var(--txt3);padding:28px;font-size:13px">Aucun fil tracé. Activez le mode câblage et tracez des fils entre les appareils.</p>';
+    return;
+  }
+  const scale=getScale();
+  const ceilH=parseFloat(document.getElementById('ceiling-h')?.value||2.5);
+
+  let html=`<div style="font-family:'Space Mono',monospace;font-size:10px;color:var(--txt3);margin-bottom:12px">
+    Hauteur sous plafond : ${ceilH}m · Échelle estimée : 1px ≈ ${(scale*100).toFixed(2)}cm
+  </div>`;
+  html+=`<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr style="color:var(--txt3);font-size:10px;border-bottom:1px solid var(--brd)">
+      <th style="text-align:left;padding:6px 8px">Circuit</th>
+      <th style="text-align:left;padding:6px 8px">De → Vers</th>
+      <th style="text-align:right;padding:6px 8px">Longueur brute</th>
+      <th style="text-align:right;padding:6px 8px">+ Descente</th>
+      <th style="text-align:right;padding:6px 8px;color:var(--warn)">Total estimé</th>
+      <th style="text-align:right;padding:6px 8px">Section</th>
+    </tr></thead><tbody>`;
+
+  S.wires.forEach(w=>{
+    const pts=[w.fromPt,...(w.cps||[]),w.toPt];
+    const lenPx=polylineLength(pts);
+    const hRun=(lenPx*scale).toFixed(1);
+    const wh1=getDeviceHeight(w.fromKey), wh2=getDeviceHeight(w.toKey);
+    const vDrop=((ceilH-wh1)+(ceilH-wh2)+0.3).toFixed(1);
+    const total=wiredLengthM(w);
+    const sect=w.circuit==='PC'?'2.5mm²':w.circuit==='éclairage'?'1.5mm²':w.circuit.includes('dédié')?'4mm²':w.circuit==='VMC'?'1.5mm²':'2.5mm²';
+    function devLbl(key){
+      if(!key||key==='TGBT') return 'TGBT';
+      const parts=key.split('_'); const rid=parts.slice(0,-2).join('_'); const di=parseInt(parts[parts.length-2]);
+      const room=S.rooms.find(r=>r.id===rid);
+      if(room&&!isNaN(di)){const d=room.devices[di];if(d)return `${d.icon}${d.name.slice(0,10)} (${room.name.slice(0,8)})`;}
+      return key.split('_').slice(-1)[0];
+    }
+    html+=`<tr style="border-bottom:1px solid var(--brd)">
+      <td style="padding:5px 8px"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${w.color};margin-right:5px"></span>${w.circuit}</td>
+      <td style="padding:5px 8px;color:var(--txt2);font-size:10px">${devLbl(w.fromKey)}<span style="color:var(--txt3)"> → </span>${devLbl(w.toKey)}</td>
+      <td style="padding:5px 8px;text-align:right;font-family:'Space Mono',monospace;font-size:11px">${hRun} m</td>
+      <td style="padding:5px 8px;text-align:right;font-family:'Space Mono',monospace;font-size:11px;color:var(--txt3)">+${vDrop} m</td>
+      <td style="padding:5px 8px;text-align:right;font-family:'Space Mono',monospace;font-size:11px;color:var(--warn);font-weight:700">~${total} m</td>
+      <td style="padding:5px 8px;text-align:right;color:var(--txt3);font-size:11px">${sect}</td>
+    </tr>`;
+  });
+
+  // Totals by circuit
+  const groups={};
+  S.wires.forEach(w=>{ if(!groups[w.circuit])groups[w.circuit]={color:w.color,total:0,sect:''}; groups[w.circuit].total+=wiredLengthM(w); });
+  html+=`</tbody></table>
+  <div style="margin-top:16px;font-size:11px;font-weight:600;color:var(--txt2);margin-bottom:8px">Récapitulatif par circuit</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">`;
+  Object.entries(groups).forEach(([circ,g])=>{
+    const sect=circ==='PC'?'2.5mm²':circ==='éclairage'?'1.5mm²':circ.includes('dédié')?'2.5mm²':'1.5mm²';
+    html+=`<div style="background:var(--sur2);border:1px solid var(--brd);border-radius:8px;padding:10px 12px">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span style="width:10px;height:10px;border-radius:3px;background:${g.color};display:inline-block"></span>
+        <span style="font-size:11px;color:var(--txt)">${circ}</span>
+      </div>
+      <div style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--warn)">~${g.total.toFixed(1)} m</div>
+      <div style="font-size:10px;color:var(--txt3);margin-top:2px">Section : ${sect}</div>
+    </div>`;
+  });
+  const grandTotal=Object.values(groups).reduce((s,g)=>s+g.total,0);
+  html+=`<div style="background:var(--sur2);border:2px solid var(--acc);border-radius:8px;padding:10px 12px">
+    <div style="font-size:11px;color:var(--acc);margin-bottom:4px">⚡ Total général</div>
+    <div style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--acc)">~${grandTotal.toFixed(1)} m</div>
+    <div style="font-size:10px;color:var(--txt3);margin-top:2px">Hauteur plafond ${ceilH}m incluse</div>
+  </div></div>`;
+  cont.innerHTML=html;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ZOOM & PAN CONTROLS
+═══════════════════════════════════════════════════════════ */
+function applyZoomTransform(){
+  const planc=document.getElementById('planc');
+  if(!planc) return;
+  
+  const roomSvg=document.getElementById('room-svg');
+  const wireSvg=document.getElementById('wire-svg');
+  const devLayer=document.getElementById('dev-layer');
+  const planBg=document.getElementById('plan-bg');
+  
+  const transform=`translate(${UI.panX}px, ${UI.panY}px) scale(${UI.zoomLevel})`;
+  const transformOrigin='top left';
+  
+  if(roomSvg) { roomSvg.style.transform=transform; roomSvg.style.transformOrigin=transformOrigin; }
+  if(wireSvg) { wireSvg.style.transform=transform; wireSvg.style.transformOrigin=transformOrigin; }
+  if(devLayer) { devLayer.style.transform=transform; devLayer.style.transformOrigin=transformOrigin; }
+  if(planBg) { planBg.style.transform=transform; planBg.style.transformOrigin=transformOrigin; }
+}
+
+function resetZoom(){
+  UI.zoomLevel=1;
+  UI.panX=0;
+  UI.panY=0;
+  applyZoomTransform();
+  toast('Zoom réinitialisé');
+}
+
+function showZoomLevel(){
+  const pct=Math.round(UI.zoomLevel*100);
+  toast(`Zoom: ${pct}%`);
+}
+
+function handlePlanWheel(e){
+  if(e.ctrlKey||e.metaKey){
+    e.preventDefault();
+    const planc=document.getElementById('planc');
+    const rect=planc.getBoundingClientRect();
+    const mouseX=e.clientX-rect.left;
+    const mouseY=e.clientY-rect.top;
+    
+    // Calculate zoom delta
+    const zoomDelta=e.deltaY>0?0.9:1.1;
+    const newZoom=Math.max(0.2,Math.min(5, UI.zoomLevel*zoomDelta));
+    
+    // Adjust pan to zoom toward mouse position
+    const zoomChange=newZoom/UI.zoomLevel;
+    UI.panX=mouseX-(mouseX-UI.panX)*zoomChange;
+    UI.panY=mouseY-(mouseY-UI.panY)*zoomChange;
+    
+    UI.zoomLevel=newZoom;
+    applyZoomTransform();
+  }
+}
+
+function startPan(e){
+  if(e.button!==2) return; // Right mouse button
+  e.preventDefault();
+  const planc=document.getElementById('planc');
+  const startX=e.clientX;
+  const startY=e.clientY;
+  const startPanX=UI.panX;
+  const startPanY=UI.panY;
+  
+  function mv(ev){
+    UI.panX=startPanX+(ev.clientX-startX);
+    UI.panY=startPanY+(ev.clientY-startY);
+    applyZoomTransform();
+  }
+  
+  function up(){
+    document.removeEventListener('mousemove', mv);
+    document.removeEventListener('mouseup', up);
+    document.removeEventListener('contextmenu', contextMenuHandler);
+  }
+  
+  function contextMenuHandler(e){ e.preventDefault(); }
+  
+  document.addEventListener('mousemove', mv);
+  document.addEventListener('mouseup', up);
+  document.addEventListener('contextmenu', contextMenuHandler);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   INIT
+═══════════════════════════════════════════════════════════ */
+window.addEventListener('resize',()=>{ if(S.rooms.length) renderPlan(); });
+
+// Plan container: handle clicks and context menu
+document.getElementById('planc').addEventListener('click', planClick);
+function plancMouseDown(e){
+  // Allow room-svg polygon/vertex mousedown to propagate naturally
+  // (room-svg is below wire-svg which is pointer-events:none)
+}
+document.getElementById('planc').addEventListener('contextmenu',(e)=>{ e.preventDefault(); });
+
+// Zoom with Ctrl+Scroll
+document.getElementById('planc').addEventListener('wheel', handlePlanWheel, {passive:false});
+
+// Pan with right-click drag
+document.getElementById('planc').addEventListener('mousedown', startPan);
+
+// Keyboard zoom shortcuts
+document.addEventListener('keydown', e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
+  if(e.key==='+'||e.key==='='){
+    e.preventDefault();
+    UI.zoomLevel=Math.min(5, UI.zoomLevel*1.2);
+    applyZoomTransform();
+    showZoomLevel();
+  }
+  if(e.key==='-'||e.key==='_'){
+    e.preventDefault();
+    UI.zoomLevel=Math.max(0.2, UI.zoomLevel/1.2);
+    applyZoomTransform();
+    showZoomLevel();
+  }
+  if(e.key==='0'&&e.ctrlKey){
+    e.preventDefault();
+    resetZoom();
+  }
+});
+
+// File input: show background image
+document.getElementById('file-input').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const fnEl=document.getElementById('fname');
+  fnEl.textContent=f.name; fnEl.style.display='inline';
+  // Show as background
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const bg=document.getElementById('plan-bg');
+    bg.src=ev.target.result;
+    bg.style.display='block';
+    bg.style.opacity=S.bgOp/100;
+    S.bgDataUrl=ev.target.result;
+  };
+  reader.readAsDataURL(f);
+  showStatus(`Image chargée : ${f.name} — cliquez Analyser`,'ok');
+  toast('Plan chargé — cliquez Analyser');
+  // will be saved to apartment in the onload callback (S.bgDataUrl setter)
+});
+
+document.getElementById('bg-op').addEventListener('input',e=>setBgOp(e.target.value));
+
+/* ═══════════════════════════════════════════════════════════════════
+   POWER FACTORS STATE
+   Each circuit type has: simultaneity coeff (ks), usage coeff (ku),
+   extension coeff (ke for future load) — all editable
+═══════════════════════════════════════════════════════════════════ */
+const POWER_FACTORS = {
+  'éclairage':     {ks:1.0,  ku:0.5,  ke:1.10, desc:'Éclairage général'},
+  'PC':            {ks:0.10, ku:0.7,  ke:1.20, desc:'Prises courant (simult. NFC)'},
+  'dédié':         {ks:1.0,  ku:0.8,  ke:1.10, desc:'Circuit dédié'},
+  'dédié cuisson': {ks:1.0,  ku:0.75, ke:1.15, desc:'Cuisson / Induction'},
+  'dédié four':    {ks:1.0,  ku:0.75, ke:1.10, desc:'Four électrique'},
+  'dédié IRVE':    {ks:1.0,  ku:0.9,  ke:1.30, desc:'Borne VE (IRVE)'},
+  'VMC':           {ks:1.0,  ku:1.0,  ke:1.05, desc:'VMC / Ventilation'},
+  'commande':      {ks:0.5,  ku:0.5,  ke:1.0,  desc:'Commande / signalisation'},
+  'courants faibles':{ks:0.2,ku:0.5,  ke:1.0,  desc:'Courants faibles'},
+  'PC Z2':         {ks:1.0,  ku:0.5,  ke:1.10, desc:'Prise SDB zone 2'},
+};
+
+function getPFactor(circuit){
+  return POWER_FACTORS[circuit]||{ks:0.5,ku:0.7,ke:1.1,desc:'Autre'};
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   POWERS VIEW — tableau des puissances avec facteurs modifiables
+═══════════════════════════════════════════════════════════════════ */
+function buildPowersView(){
+  const cont=document.getElementById('vpowers-inner');
+
+  // Aggregate data by circuit across all rooms
+  const circData = {};
+  S.rooms.forEach(room=>{
+    room.devices.forEach(d=>{
+      if(d.qty===0) return;
+      if(!circData[d.circuit]) circData[d.circuit]={
+        circuit:d.circuit, items:[], totalInstalled:0, qty:0
+      };
+      const pInst=d.power*d.qty;
+      circData[d.circuit].totalInstalled+=pInst;
+      circData[d.circuit].qty+=d.qty;
+      circData[d.circuit].items.push({name:d.name,icon:d.icon,power:d.power,qty:d.qty,room:room.name});
+    });
+  });
+
+  // Per-room power breakdown
+  const roomData=S.rooms.map(room=>{
+    let pInst=0, pEff=0, pMax=0;
+    room.devices.forEach(d=>{
+      if(!d.qty) return;
+      const pf=getPFactor(d.circuit);
+      const pi=d.power*d.qty;
+      pInst+=pi;
+      pEff+=pi*pf.ks*pf.ku;
+      pMax+=pi*pf.ke;
+    });
+    return {name:room.name,color:room.color,pInst,pEff,pMax};
+  });
+
+  const totalInst=roomData.reduce((s,r)=>s+r.pInst,0);
+  const totalEff=roomData.reduce((s,r)=>s+r.pEff,0);
+  const totalMax=roomData.reduce((s,r)=>s+r.pMax,0);
+  const mainAmp=Math.ceil(totalEff/230/1.25/10)*10;
+  const branchAmp=Math.ceil(totalMax/230/10)*10;
+
+  let html=`<div class="view-header">
+    <span class="view-title">⚡ Tableau des puissances</span>
+    <div class="export-btns">
+      <button class="exp-btn" onclick="exportPowerCSV()">⬇ CSV Puissances</button>
+      <button class="exp-btn pdf" onclick="exportViewPDF('vpowers-inner','puissances')">⬇ PDF</button>
+    </div>
+  </div>
+
+  <div class="summary-cards">
+    <div class="sum-card"><div class="sum-val">${(totalInst/1000).toFixed(2)} kW</div><div class="sum-label">Puissance installée</div></div>
+    <div class="sum-card accent"><div class="sum-val">${(totalEff/1000).toFixed(2)} kW</div><div class="sum-label">Puissance efficace (avec Ks·Ku)</div></div>
+    <div class="sum-card"><div class="sum-val">${(totalMax/1000).toFixed(2)} kW</div><div class="sum-label">Puissance prévisionnelle (×Ke)</div></div>
+    <div class="sum-card ok"><div class="sum-val">${mainAmp}A</div><div class="sum-label">Disj. général estimé</div></div>
+  </div>
+
+  <h3 style="font-size:11px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Facteurs par circuit <span style="font-weight:400;color:var(--txt3);font-style:italic">— modifiables</span></h3>
+  <div style="overflow-x:auto;margin-bottom:18px">
+  <table class="data-table">
+    <thead><tr>
+      <th>Circuit</th><th>Description</th>
+      <th title="Puissance installée totale">P installée (W)</th>
+      <th title="Coefficient de simultanéité NFC 15-100">Ks <span style="color:var(--txt3)">(simult.)</span></th>
+      <th title="Coefficient d'utilisation estimé">Ku <span style="color:var(--txt3)">(utilisation)</span></th>
+      <th title="Coefficient d'extension (prévisionnelle)">Ke <span style="color:var(--txt3)">(extension)</span></th>
+      <th title="Puissance efficace = P × Ks × Ku">P efficace (W)</th>
+      <th title="Puissance prévisionnelle = P × Ke">P prévis. (W)</th>
+      <th title="Intensité de calcul efficace">I calcul (A)</th>
+    </tr></thead><tbody>`;
+
+  let effSum=0, maxSum=0;
+  Object.entries(circData).forEach(([circ,cd])=>{
+    const pf=getPFactor(circ);
+    const pEff=Math.round(cd.totalInstalled*pf.ks*pf.ku);
+    const pMax=Math.round(cd.totalInstalled*pf.ke);
+    const iCalc=(pEff/230).toFixed(1);
+    const col=CMAP[circ]||'#8890a8';
+    effSum+=pEff; maxSum+=pMax;
+    html+=`<tr>
+      <td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${col};margin-right:5px"></span>${circ}</td>
+      <td style="color:var(--txt3);font-size:11px">${pf.desc}</td>
+      <td class="num">${cd.totalInstalled}</td>
+      <td class="num">
+        <input class="coef-input" type="number" value="${pf.ks}" min="0.01" max="1" step="0.01"
+          onchange="setPF('${circ}','ks',this.value)" title="Modifier Ks pour ${circ}">
+      </td>
+      <td class="num">
+        <input class="coef-input" type="number" value="${pf.ku}" min="0.01" max="1" step="0.01"
+          onchange="setPF('${circ}','ku',this.value)" title="Modifier Ku pour ${circ}">
+      </td>
+      <td class="num">
+        <input class="coef-input" type="number" value="${pf.ke}" min="1" max="3" step="0.01"
+          onchange="setPF('${circ}','ke',this.value)" title="Modifier Ke pour ${circ}">
+      </td>
+      <td class="hi">${pEff}</td>
+      <td class="num" style="color:var(--txt2)">${pMax}</td>
+      <td class="num" style="color:var(--acc)">${iCalc}A</td>
+    </tr>`;
+  });
+
+  html+=`<tr style="border-top:2px solid var(--brd);font-weight:600">
+    <td colspan="2" style="color:var(--txt)">TOTAL</td>
+    <td class="num">${Math.round(totalInst)}</td>
+    <td colspan="3"></td>
+    <td class="hi">${Math.round(effSum)}</td>
+    <td class="num" style="color:var(--txt2)">${Math.round(maxSum)}</td>
+    <td class="num" style="color:var(--acc)">${(effSum/230).toFixed(1)}A</td>
+  </tr></tbody></table></div>
+
+  <h3 style="font-size:11px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Bilan par pièce</h3>
+  <div style="overflow-x:auto">
+  <table class="data-table">
+    <thead><tr>
+      <th>Pièce</th>
+      <th>P installée (W)</th>
+      <th>P efficace (W)</th>
+      <th>P prévis. (W)</th>
+      <th>% du total</th>
+    </tr></thead><tbody>`;
+
+  roomData.forEach(r=>{
+    const pct=totalEff>0?(r.pEff/totalEff*100).toFixed(1):'0';
+    html+=`<tr>
+      <td><span style="display:inline-block;width:8px;height:8px;border-radius:3px;background:${r.color};margin-right:6px"></span>${r.name}</td>
+      <td class="num">${Math.round(r.pInst)}</td>
+      <td class="hi">${Math.round(r.pEff)}</td>
+      <td class="num" style="color:var(--txt2)">${Math.round(r.pMax)}</td>
+      <td class="num" style="color:var(--acc)">${pct}%</td>
+    </tr>`;
+  });
+
+  html+=`<tr style="font-weight:600;border-top:2px solid var(--brd)">
+    <td>TOTAL</td>
+    <td class="num">${Math.round(totalInst)}</td>
+    <td class="hi">${Math.round(totalEff)}</td>
+    <td class="num" style="color:var(--txt2)">${Math.round(totalMax)}</td>
+    <td class="num" style="color:var(--acc)">100%</td>
+  </tr></tbody></table></div>
+
+  <div style="margin-top:14px;padding:10px 14px;background:var(--sur2);border:1px solid var(--brd);border-radius:var(--rad);font-size:11px;color:var(--txt3)">
+    <b style="color:var(--txt)">Légende :</b>
+    Ks = coefficient de simultanéité NFC 15-100 ·
+    Ku = coefficient d'utilisation (charge réelle estimée) ·
+    Ke = coefficient d'extension (prévisionnelle future) ·
+    P efficace = P installée × Ks × Ku ·
+    P prévisionnelle = P installée × Ke
+  </div>`;
+
+  cont.innerHTML=html;
+}
+
+function setPF(circuit, field, val){
+  if(!POWER_FACTORS[circuit]) POWER_FACTORS[circuit]={ks:.5,ku:.7,ke:1.1,desc:'Autre'};
+  POWER_FACTORS[circuit][field]=Math.max(0.01,parseFloat(val)||0.5);
+  buildPowersView();
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   DEVICES TABLE VIEW
+═══════════════════════════════════════════════════════════════════ */
+function buildDevicesView(){
+  const cont=document.getElementById('vdevices-inner');
+
+  // Build flat list of all device instances
+  const rows=[];
+  S.rooms.forEach(room=>{
+    room.devices.forEach((d,di)=>{
+      if(!d.qty) return;
+      const pf=getPFactor(d.circuit);
+      const pInst=d.power*d.qty;
+      const pEff=Math.round(pInst*pf.ks*pf.ku);
+      const sect=d.circuit==='PC'?'2.5mm²':d.circuit==='éclairage'?'1.5mm²':d.circuit.includes('dédié')?'4mm²':'1.5mm²';
+      const cbAmp=d.amp>=32?32:d.amp>=20?20:d.amp>=16?16:d.amp>=10?10:6;
+      rows.push({
+        icon:d.icon, name:d.name, room:room.name, roomColor:room.color,
+        circuit:d.circuit, qty:d.qty,
+        power:d.power, pInst, pEff,
+        amp:d.amp, cbAmp, section:sect,
+        wallH:(d.wallH??1.0),
+        ks:pf.ks, ku:pf.ku
+      });
+    });
+  });
+
+  const totalQty=rows.reduce((s,r)=>s+r.qty,0);
+  const totalPInst=rows.reduce((s,r)=>s+r.pInst,0);
+  const totalPEff=rows.reduce((s,r)=>s+r.pEff,0);
+
+  let html=`<div class="view-header">
+    <span class="view-title">🔌 Tableau des appareils installés</span>
+    <div class="export-btns">
+      <button class="exp-btn" onclick="exportDevicesCSV()">⬇ CSV Appareils</button>
+      <button class="exp-btn" onclick="exportFullCSV()">⬇ CSV Complet</button>
+      <button class="exp-btn pdf" onclick="exportViewPDF('vdevices-inner','appareils')">⬇ PDF</button>
+    </div>
+  </div>
+
+  <div class="summary-cards">
+    <div class="sum-card"><div class="sum-val">${totalQty}</div><div class="sum-label">Total appareils</div></div>
+    <div class="sum-card"><div class="sum-val">${(totalPInst/1000).toFixed(2)} kW</div><div class="sum-label">P installée</div></div>
+    <div class="sum-card accent"><div class="sum-val">${(totalPEff/1000).toFixed(2)} kW</div><div class="sum-label">P efficace</div></div>
+    <div class="sum-card ok"><div class="sum-val">${rows.length}</div><div class="sum-label">Lignes uniques</div></div>
+  </div>
+
+  <div style="overflow-x:auto">
+  <table class="data-table">
+    <thead><tr>
+      <th>#</th><th>Appareil</th><th>Pièce</th><th>Circuit</th>
+      <th>Qté</th><th>P unit. (W)</th><th>P totale (W)</th><th>P eff. (W)</th>
+      <th>Intensité (A)</th><th>Disj. (A)</th><th>Section</th><th>Hauteur pose</th>
+    </tr></thead><tbody>`;
+
+  rows.forEach((r,i)=>{
+    const col=CMAP[r.circuit]||'#8890a8';
+    html+=`<tr>
+      <td style="color:var(--txt3);font-size:10px">${i+1}</td>
+      <td>${r.icon} <b style="font-size:12px">${r.name}</b></td>
+      <td><span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:${r.roomColor};margin-right:4px"></span><span style="font-size:11px;color:var(--txt2)">${r.room}</span></td>
+      <td><span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:${col};margin-right:4px"></span><span style="font-size:11px">${r.circuit}</span></td>
+      <td class="num">${r.qty}</td>
+      <td class="num">${r.power}</td>
+      <td class="num">${r.pInst}</td>
+      <td class="hi">${r.pEff}</td>
+      <td class="num">${r.amp}</td>
+      <td class="num" style="color:var(--acc)">${r.cbAmp}</td>
+      <td class="num" style="color:var(--txt2)">${r.section}</td>
+      <td class="num" style="color:var(--txt3)">${r.wallH.toFixed(1)} m</td>
+    </tr>`;
+  });
+
+  html+=`<tr style="font-weight:600;border-top:2px solid var(--brd)">
+    <td colspan="4">TOTAL</td>
+    <td class="num">${totalQty}</td>
+    <td></td>
+    <td class="num">${Math.round(totalPInst)}</td>
+    <td class="hi">${Math.round(totalPEff)}</td>
+    <td colspan="4"></td>
+  </tr></tbody></table></div>`;
+
+  cont.innerHTML=html;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   CSV EXPORTS
+═══════════════════════════════════════════════════════════════════ */
+function dlCSV(filename, rows, headers){
+  const bom='\uFEFF'; // UTF-8 BOM for Excel
+  const esc=v=>{
+    const s=String(v===null||v===undefined?'':v);
+    return s.includes(',')||s.includes('"')||s.includes('\n') ? `"${s.replace(/"/g,'""')}"` : s;
+  };
+  const csv=bom+[headers,...rows].map(r=>r.map(esc).join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; a.click();
+  toast('CSV exporté : '+filename);
+}
+
+function exportDevicesCSV(){
+  const headers=['#','Appareil','Pièce','Circuit','Quantité','P unitaire (W)',
+    'P totale (W)','P efficace (W)','Intensité (A)','Disjoncteur (A)','Section câble','Hauteur pose (m)'];
+  const rows=[];
+  let i=0;
+  S.rooms.forEach(room=>{
+    room.devices.forEach(d=>{
+      if(!d.qty) return;
+      const pf=getPFactor(d.circuit);
+      const pEff=Math.round(d.power*d.qty*pf.ks*pf.ku);
+      const sect=d.circuit==='PC'?'2.5mm²':d.circuit==='éclairage'?'1.5mm²':d.circuit.includes('dédié')?'4mm²':'1.5mm²';
+      const cbAmp=d.amp>=32?32:d.amp>=20?20:d.amp>=16?16:d.amp>=10?10:6;
+      rows.push([++i,d.name,room.name,d.circuit,d.qty,d.power,d.power*d.qty,pEff,d.amp,cbAmp,sect,(d.wallH??1.0).toFixed(1)]);
+    });
+  });
+  dlCSV('thunder_appareils.csv',rows,headers);
+}
+
+function exportPowerCSV(){
+  const headers=['Circuit','Description','P installée (W)','Ks','Ku','Ke','P efficace (W)','P prévis. (W)','I calcul (A)'];
+  const rows=[];
+  const circData={};
+  S.rooms.forEach(room=>{ room.devices.forEach(d=>{ if(!d.qty) return; if(!circData[d.circuit]) circData[d.circuit]=0; circData[d.circuit]+=d.power*d.qty; }); });
+  Object.entries(circData).forEach(([circ,pInst])=>{
+    const pf=getPFactor(circ);
+    const pEff=Math.round(pInst*pf.ks*pf.ku);
+    const pMax=Math.round(pInst*pf.ke);
+    rows.push([circ,pf.desc,Math.round(pInst),pf.ks,pf.ku,pf.ke,pEff,pMax,(pEff/230).toFixed(1)]);
+  });
+  dlCSV('thunder_puissances.csv',rows,headers);
+}
+
+function exportFullCSV(){
+  // Multi-section CSV: devices + powers + wires
+  const bom='\uFEFF';
+  const esc=v=>{ const s=String(v??''); return s.includes(',')||s.includes('"') ? `"${s.replace(/"/g,'""')}"` : s; };
+  const ln=r=>r.map(esc).join(',');
+  let csv=bom;
+
+  // Section 1: Summary
+  const ceilH=parseFloat(document.getElementById('ceiling-h')?.value||2.5);
+  const planW=parseFloat(document.getElementById('plan-width-m')?.value||12);
+  csv+=ln(['RÉSUMÉ THUNDER',''])+'\r\n';
+  csv+=ln(['Hauteur sous plafond (m)',ceilH])+'\r\n';
+  csv+=ln(['Largeur plan réelle (m)',planW])+'\r\n';
+  csv+=ln(['Pièces',S.rooms.length])+'\r\n';
+  csv+='\r\n';
+
+  // Section 2: Devices
+  csv+=ln(['APPAREILS INSTALLÉS'])+'\r\n';
+  csv+=ln(['Appareil','Pièce','Circuit','Qté','P unit. (W)','P totale (W)','Disj. (A)','Section','Hauteur (m)'])+'\r\n';
+  S.rooms.forEach(room=>{ room.devices.forEach(d=>{ if(!d.qty) return; const cbA=d.amp>=32?32:d.amp>=16?16:d.amp>=10?10:6; const sect=d.circuit==='PC'?'2.5mm²':d.circuit==='éclairage'?'1.5mm²':d.circuit.includes('dédié')?'4mm²':'1.5mm²'; csv+=ln([d.name,room.name,d.circuit,d.qty,d.power,d.power*d.qty,cbA,sect,(d.wallH??1).toFixed(1)])+'\r\n'; }); });
+  csv+='\r\n';
+
+  // Section 3: Powers
+  csv+=ln(['BILAN DE PUISSANCE'])+'\r\n';
+  csv+=ln(['Circuit','P installée (W)','Ks','Ku','Ke','P efficace (W)','P prévis. (W)','I calcul (A)'])+'\r\n';
+  const circData={};
+  S.rooms.forEach(room=>{ room.devices.forEach(d=>{ if(!d.qty) return; if(!circData[d.circuit]) circData[d.circuit]=0; circData[d.circuit]+=d.power*d.qty; }); });
+  Object.entries(circData).forEach(([circ,pInst])=>{ const pf=getPFactor(circ); csv+=ln([circ,Math.round(pInst),pf.ks,pf.ku,pf.ke,Math.round(pInst*pf.ks*pf.ku),Math.round(pInst*pf.ke),(pInst*pf.ks*pf.ku/230).toFixed(1)])+'\r\n'; });
+  csv+='\r\n';
+
+  // Section 4: Cables
+  if(S.wires.length){
+    const scale=getScale();
+    csv+=ln(['CÂBLAGE — LONGUEURS ESTIMÉES'])+'\r\n';
+    csv+=ln(['Circuit','De','Vers','Longueur horizontale (m)','Descente verticale (m)','Total estimé (m)','Section câble'])+'\r\n';
+    S.wires.forEach(w=>{
+      function devLbl(key){ if(!key||key==='TGBT') return 'TGBT'; const parts=key.split('_'); const rid=parts.slice(0,-2).join('_'); const di=parseInt(parts[parts.length-2]); const room=S.rooms.find(r=>r.id===rid); return room&&!isNaN(di)?(room.devices[di]?.name||key):key; }
+      function devH(key){ if(!key||key==='TGBT') return 0; const parts=key.split('_'); const rid=parts.slice(0,-2).join('_'); const di=parseInt(parts[parts.length-2]); const room=S.rooms.find(r=>r.id===rid); return room&&!isNaN(di)?(room.devices[di]?.wallH??1):1; }
+      const cp=w.cp||{x:(w.fromPt.x+w.toPt.x)/2,y:Math.min(w.fromPt.y,w.toPt.y)-30};
+      const lenPx=bezierLengthPx(w.fromPt.x,w.fromPt.y,cp.x,cp.y,w.toPt.x,w.toPt.y);
+      const hRun=(lenPx*scale).toFixed(2);
+      const h1=devH(w.fromKey),h2=devH(w.toKey);
+      const vDrop=((ceilH-h1)+(ceilH-h2)+0.3).toFixed(2);
+      const total=(parseFloat(hRun)+parseFloat(vDrop)).toFixed(2);
+      const sect=w.circuit==='éclairage'?'1.5mm²':w.circuit.includes('dédié')?'4mm²':'2.5mm²';
+      csv+=ln([w.circuit,devLbl(w.fromKey),devLbl(w.toKey),hRun,vDrop,total,sect])+'\r\n';
+    });
+    csv+='\r\n';
+  }
+
+  // Protection devices
+  csv+=ln(['APPAREILS DE PROTECTION'])+'\r\n';
+  csv+=ln(['Pièce','Protection','Spec','Type'])+'\r\n';
+  S.rooms.forEach(room=>{ (room.protections||[]).forEach(p=>{ csv+=ln([room.name,p.name,p.spec,p.type.toUpperCase()])+'\r\n'; }); });
+
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='thunder_complet.csv'; a.click();
+  toast('Export CSV complet généré');
+}
+
+// Quick entry point for topbar button
+function exportCSV(){ exportFullCSV(); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   PDF EXPORT — using html2pdf library for automatic download
+═══════════════════════════════════════════════════════════════════ */
+async function exportViewPDF(containerId, title){
+  const cont=document.getElementById(containerId);
+  if(!cont){ toast('Vue introuvable'); return; }
+  
+  try {
+    // Load html2pdf library if not already loaded
+    if(!window.html2pdf){
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      await new Promise((resolve) => {
+        script.onload = resolve;
+        document.head.appendChild(script);
+      });
+    }
+    
+    // Create a temporary container for PDF content
+    const pdfContainer = document.createElement('div');
+    pdfContainer.style.padding = '20px';
+    pdfContainer.style.backgroundColor = '#ffffff';
+    pdfContainer.innerHTML = `
+      <h1 style="font-family:'Space Mono',monospace;font-size:16px;color:#1a1a2e;margin-bottom:16px;padding-bottom:8px;border-bottom:2px solid #5b8af7">
+        thunder — ${title.charAt(0).toUpperCase()+title.slice(1)}
+      </h1>
+      ${cont.innerHTML}
+      <div style="margin-top:20px;font-size:10px;color:#999;border-top:1px solid #e8eaf0;padding-top:8px">
+        Généré par Thunder — NFC 15-100 — ${new Date().toLocaleDateString('fr-FR')}
+      </div>
+    `;
+    
+    // Replace inputs with their values
+    pdfContainer.querySelectorAll('input').forEach(el=>{
+      const span=document.createElement('span');
+      span.style.fontFamily="'Space Mono',monospace";
+      span.style.fontSize="11px";
+      span.style.color="#333";
+      span.textContent=el.value;
+      el.replaceWith(span);
+    });
+    
+    // Remove export buttons
+    pdfContainer.querySelectorAll('.export-btns,.exp-btn').forEach(e=>e.remove());
+    
+    // Generate PDF with automatic download
+    const filename = `Thunder_${title.replace(/\s+/g,'_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+    const options = {
+      margin: 10,
+      filename: filename,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' }
+    };
+    
+    window.html2pdf().set(options).from(pdfContainer).save();
+    toast('PDF téléchargé: ' + filename);
+  } catch(e) {
+    console.error('Erreur lors de l\'export PDF:', e);
+    toast('Erreur lors de la génération du PDF');
+  }
+}
+
+async function exportPlanPDF(){
+  // Render plan + wiring to canvas → PDF via html2pdf
+  try {
+    // Load html2pdf library if not already loaded
+    if(!window.html2pdf){
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      await new Promise((resolve) => {
+        script.onload = resolve;
+        document.head.appendChild(script);
+      });
+    }
+    
+    const planc = document.getElementById('planc');
+    const planSvg = document.getElementById('room-svg');
+    const wireSvg = document.getElementById('wire-svg');
+    const bgImg = document.getElementById('plan-bg');
+    
+    // Create a temporary container for PDF content
+    const pdfContainer = document.createElement('div');
+    pdfContainer.style.padding = '20px';
+    pdfContainer.style.backgroundColor = '#ffffff';
+    
+    // Add title
+    const title = document.createElement('h1');
+    title.style.cssText = "font-family:'Space Mono',monospace;font-size:16px;color:#1a1a2e;margin-bottom:16px;padding-bottom:8px;border-bottom:2px solid #5b8af7";
+    title.textContent = 'Thunder — Plan & Câblage';
+    pdfContainer.appendChild(title);
+    
+    // Add info line
+    const info = document.createElement('div');
+    info.style.cssText = "font-family:sans-serif;font-size:11px;color:#666;padding:8px 0 16px 0;margin-bottom:16px";
+    info.textContent = `Généré le ${new Date().toLocaleDateString('fr-FR')} · ${S.rooms.length} pièces · ${S.wires.length} fils`;
+    pdfContainer.appendChild(info);
+    
+    // Clone SVG content for PDF
+    const svgClone = document.createElement('div');
+    svgClone.style.cssText = "border:1px solid #ddd;border-radius:8px;overflow:hidden;background:#f5f5f5";
+    if(planSvg) {
+      const planClone = planSvg.cloneNode(true);
+      planClone.style.cssText = "width:100%;height:auto;display:block";
+      svgClone.appendChild(planClone);
+    }
+    pdfContainer.appendChild(svgClone);
+    
+    // Add footer
+    const footer = document.createElement('div');
+    footer.style.cssText = "margin-top:20px;font-size:10px;color:#999;border-top:1px solid #e8eaf0;padding-top:8px";
+    footer.textContent = `Généré par ElecPlan — NFC 15-100 — ${new Date().toLocaleDateString('fr-FR')}`;
+    pdfContainer.appendChild(footer);
+    
+    // Generate PDF with automatic download
+    const filename = `Thunder_Plan_${new Date().toISOString().split('T')[0]}.pdf`;
+    const options = {
+      margin: 10,
+      filename: filename,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' }
+    };
+    
+    window.html2pdf().set(options).from(pdfContainer).save();
+    toast('PDF téléchargé: ' + filename);
+  } catch(e) {
+    console.error('Erreur lors de l\'export PDF du plan:', e);
+    toast('Erreur lors de la génération du PDF');
+  }
+}
+
+// Main exportPDF button — shows choice
+function exportPDF(){
+  // Export current active view or ask
+  const activeView=S.view;
+  if(activeView==='schema')      exportViewPDF('vschema-inner','schéma unifilaire');
+  else if(activeView==='wiring') exportViewPDF('vwiring-inner','vue câblage');
+  else if(activeView==='lengths')exportViewPDF('vlengths-inner','longueurs de câbles');
+  else if(activeView==='powers') exportViewPDF('vpowers-inner','tableau des puissances');
+  else if(activeView==='devices')exportViewPDF('vdevices-inner','tableau des appareils');
+  else { toast('Basculez vers Schéma, Câblage ou Puissances puis exportez'); }
+}
+
+
+checkApiStatus();
+initBuilding();
+initTGBT();
+setTimeout(()=>analyzePlan(),500);
+</script>
+</body>
+</html>
